@@ -1,0 +1,27 @@
+@startuml
+
+class ServiceGroup <<web-editable,master-storage>> {
+  +name: string
+  +activeProfileName: string?
+}
+
+class ComposeProject {
+  +name: string
+}
+
+class ComposeService {
+  +name: string
+}
+
+class ComposeProfile <<web-editable,node-local-storage>> {
+  +name: string
+  +envVars: map[string]string
+}
+
+Host "1" *--> "0..*" ComposeProject : serves
+ComposeProject "1" *--> "1..*" ComposeService : defines
+ComposeProject "1" *--> "0..*" ComposeProfile : defines
+ServiceGroup "1..*" --> "0..*" ComposeProject : contains
+ServiceGroup "1..*" ..> "1" ComposeProfile : selects\n(loosely by name)
+
+@enduml

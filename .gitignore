@@ -1,0 +1,4 @@
+/build
+/cmd/*/*
+!/cmd/*/*.go
+*.png

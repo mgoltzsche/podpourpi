@@ -1,0 +1,173 @@
+openapi: "3.0.3"
+
+info:
+  title: "podpourpi API"
+  description: "The podpourpi REST API"
+  version: "1.0.0"
+  contact:
+    name: Max Goltzsche
+    url: https://github.com/mgoltzsche/podpourpi
+    email: max.goltzsche@gmail.com
+
+servers:
+- url: ""
+
+tags:
+- name: apps
+  description: App operations
+
+paths:
+  "/api/v1/apps":
+    get:
+      summary: List apps
+      description: List all apps
+      operationId: listApps
+      tags:
+      - apps
+      responses:
+        "200":
+          description: Return a list of apps
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/AppList"
+  "/api/v1/apps/{name}":
+    parameters:
+    - name: name
+      description: App name
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      summary: Get an app by name
+      description: Get a specific, existing app
+      operationId: getApp
+      tags:
+      - apps
+      responses:
+        "200":
+          description: Returns an app
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          description: Bad request
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Environment not found
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      summary: Update app
+      description: Update the configuration of an app
+      operationId: updateApp
+      tags:
+      - apps
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/App"
+      responses:
+        "200":
+          description: App updated
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          description: Bad request
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            Conflict: the app was changed on the server by another client meanwhile.
+            The client should obtain the latest state from the server, apply its changes again and retry the update operation.
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    Metadata:
+      type: object
+      properties:
+        name:
+          description: The object identifier
+          type: string
+      required:
+      - name
+    AppList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/App"
+      required:
+      - items
+    App:
+      type: object
+      properties:
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        status:
+          $ref: "#/components/schemas/AppStatus"
+      required:
+      - metadata
+      - status
+    AppStatus:
+      type: object
+      properties:
+        phase:
+          $ref: "#/components/schemas/Phase"
+        containers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Container"
+      required:
+      - phase
+    Container:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ContainerStatus"
+      required:
+      - name
+    ContainerStatus:
+      type: object
+      properties:
+        phase:
+          $ref: "#/components/schemas/Phase"
+        message:
+          type: string
+      required:
+      - phase
+    Phase:
+      type: string
+      enum:
+      - starting
+      - running
+      - failed
+    Error:
+      type: object
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+      required:
+      - type
+      - message

@@ -1,0 +1,21 @@
+@startuml
+
+actor Owner as owner
+
+rectangle "Web UI for Raspberry Pi and Docker Compose based IoT devices" {
+  usecase "Create/update a set of\nenv vars as profile per Compose instance.\nE.g. configure two different snapserver\nhosts for a snapclient." as manageComposeProfile
+  usecase "Activate a profile per Compose instance.\nE.g. turn the speaker in the kitchen on/off" as activateComposeProfileForNode
+  usecase "Associate a compose\ninstance with one or many groups.\nE.g. make the group 'livingroom-kitchen-audio' consist\nof the snapcast compose projects\nin both rooms" as addComposeToGroup
+  usecase "Activate a profile for all\nCompose instances associated with a group\nE.g. activate profile 'play-audio-from-desktop'\nfor group 'livingroom-kitchen-audio'" as activateComposeProfileForGroup
+}
+
+owner -> manageComposeProfile
+owner -> activateComposeProfileForNode
+owner -> addComposeToGroup
+owner -> activateComposeProfileForGroup
+
+activateComposeProfileForNode -[hidden]- manageComposeProfile
+addComposeToGroup -[hidden]- owner
+activateComposeProfileForGroup -[hidden]- owner
+
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+
+actor "Owner" AS user
+
+boundary "WebUI/API" as api
+entity "MQTT" as mqtt
+entity "RaspberryPi Node" as raspi
+entity "Docker Compose" as compose
+
+user -> api : activateProfileForGroup(serviceGroup)
+activate user
+activate api
+loop RaspberryPi Hosts in group
+  api -> mqtt : publish profile activation message\nfor group and service
+  activate mqtt
+  deactivate mqtt
+end
+deactivate api
+deactivate user
+
+raspi -> mqtt : read messages
+activate raspi
+activate mqtt
+deactivate mqtt
+alt isProfileUpdateMessage && nodeMatches && composeMatches
+  raspi -> compose : start/stop/update services\nto meet profile requirements
+  activate raspi
+  activate compose
+  deactivate compose
+  deactivate raspi
+end
+deactivate raspi
+
+@enduml
