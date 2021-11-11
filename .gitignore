@@ -2,3 +2,4 @@
 /cmd/*/*
 !/cmd/*/*.go
 *.png
+node_modules

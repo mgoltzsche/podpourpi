@@ -73,13 +73,13 @@ type UpdateAppJSONRequestBody UpdateAppJSONBody
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// List apps
-	// (GET /api/v1/apps)
+	// (GET /v1/apps)
 	ListApps(ctx echo.Context) error
 	// Get an app by name
-	// (GET /api/v1/apps/{name})
+	// (GET /v1/apps/{name})
 	GetApp(ctx echo.Context, name string) error
 	// Update app
-	// (PUT /api/v1/apps/{name})
+	// (PUT /v1/apps/{name})
 	UpdateApp(ctx echo.Context, name string) error
 }
 
@@ -157,8 +157,8 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 		Handler: si,
 	}
 
-	router.GET(baseURL+"/api/v1/apps", wrapper.ListApps)
-	router.GET(baseURL+"/api/v1/apps/:name", wrapper.GetApp)
-	router.PUT(baseURL+"/api/v1/apps/:name", wrapper.UpdateApp)
+	router.GET(baseURL+"/v1/apps", wrapper.ListApps)
+	router.GET(baseURL+"/v1/apps/:name", wrapper.GetApp)
+	router.PUT(baseURL+"/v1/apps/:name", wrapper.UpdateApp)
 
 }

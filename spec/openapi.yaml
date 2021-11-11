@@ -17,7 +17,7 @@ tags:
   description: App operations
 
 paths:
-  "/api/v1/apps":
+  "/v1/apps":
     get:
       summary: List apps
       description: List all apps
@@ -31,7 +31,7 @@ paths:
             "application/json":
               schema:
                 $ref: "#/components/schemas/AppList"
-  "/api/v1/apps/{name}":
+  "/v1/apps/{name}":
     parameters:
     - name: name
       description: App name

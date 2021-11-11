@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/sirupsen/logrus"
 )
@@ -54,9 +55,15 @@ func RunServer(ctx context.Context, opts Options) error {
 	e.HidePort = true
 	e.Listener = ln
 	e.GET("/healthz", healthCheckRequestHandler())
-	e.Static("/ui", opts.UIDir)
-	e.Use(errorHandler(opts.Logger))
-	RegisterHandlers(e, controller)
+	e.Use(requestLogger(opts.Logger))
+	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
+		Root:  opts.UIDir,
+		Index: "index.html",
+		HTML5: true,
+	}))
+	apiRouter := e.Group("/api")
+	apiRouter.Use(apiErrorHandler(opts.Logger))
+	RegisterHandlers(apiRouter, controller)
 	err = e.StartServer(srv)
 	if err != nil && err != http.ErrServerClosed {
 		return err

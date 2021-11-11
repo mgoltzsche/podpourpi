@@ -34,22 +34,17 @@ func (c *AppController) ListApps(ctx echo.Context) error {
 
 // GetApp gets an app by name.
 func (c *AppController) GetApp(ctx echo.Context, name string) error {
+	w := ctx.Response()
 	var app runner.App
 	err := c.apps.Get(name, &app)
 	if err != nil {
-		var notFound runner.NotFoundError
-		if errors.As(err, &notFound) {
-			return writeJSONResponse(ctx.Response(), http.StatusNotFound, Error{
-				Type:    "NotFound",
-				Message: err.Error(),
-			})
+		var notFoundErr *runner.NotFoundError
+		if errors.As(err, &notFoundErr) {
+			return notFound(w, err.Error())
 		}
-		return writeJSONResponse(ctx.Response(), http.StatusNotFound, Error{
-			Type:    "unexpected",
-			Message: err.Error(),
-		})
+		return internalServerError(w, err)
 	}
-	return err
+	return writeJSONResponse(w, http.StatusOK, toAppDTO(&app))
 }
 
 // UpdateApp updates an app.

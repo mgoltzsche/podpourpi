@@ -11,43 +11,55 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func errorHandler(logger *logrus.Entry) echo.MiddlewareFunc {
+func apiErrorHandler(logger *logrus.Entry) echo.MiddlewareFunc {
+	return echo.MiddlewareFunc(func(h echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			w := ctx.Response()
+			err := runRecovered(ctx, h)
+			if err != nil {
+				var httpErr *echo.HTTPError
+				if errors.As(err, &httpErr) && httpErr.Code == http.StatusNotFound {
+					_ = writeJSONResponse(w, http.StatusNotFound, Error{
+						Type:    "NotFound",
+						Message: fmt.Sprintf("%s", httpErr.Message),
+					})
+					return err
+				}
+				writeJSONResponse(w, http.StatusInternalServerError, Error{
+					Type:    "InternalServerError",
+					Message: "unexpected error occured - see server logs",
+				})
+				return err
+			}
+			return nil
+		}
+	})
+}
+
+func requestLogger(logger *logrus.Entry) echo.MiddlewareFunc {
 	return echo.MiddlewareFunc(func(h echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
 			start := time.Now()
 			req := ctx.Request()
 			resp := ctx.Response()
-			err := runRecovered(ctx, h)
-			stop := time.Now()
-			logger = logger.WithTime(stop).
-				WithField("method", req.Method).
-				WithField("uri", req.RequestURI).
-				WithField("status", resp.Status).
-				WithField("latency", stop.Sub(start))
-			if err != nil {
-				logger = logger.WithError(err)
-				logger.Error("request failed")
-				var httpErr *echo.HTTPError
-				if errors.As(err, &httpErr) {
-					if httpErr.Code == http.StatusNotFound {
-						_ = writeJSONResponse(resp, http.StatusNotFound, Error{
-							Type:    "NotFound",
-							Message: fmt.Sprintf("%s", httpErr.Message),
-						})
-						return nil
-					}
-					_ = writeJSONResponse(resp, httpErr.Code, Error{
-						Type:    "Generic",
-						Message: fmt.Sprintf("%s", httpErr.Message),
-					})
+			var err error
+			defer func() {
+				stop := time.Now()
+				l := logger.WithTime(stop).
+					WithField("method", req.Method).
+					WithField("uri", req.RequestURI).
+					WithField("status", resp.Status).
+					WithField("latency", stop.Sub(start))
+				if err != nil {
+					l = l.WithError(err)
 				}
-				_ = writeJSONResponse(resp, http.StatusInternalServerError, Error{
-					Type:    "InternalServerError",
-					Message: "(see server logs)",
-				})
-				return nil
-			}
-			logger.Info("request succeeded")
+				if err != nil || resp.Status >= http.StatusInternalServerError {
+					l.Error("request failed")
+					return
+				}
+				l.Info("request served")
+			}()
+			err = h(ctx)
 			return nil
 		}
 	})

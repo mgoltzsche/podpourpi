@@ -21,6 +21,13 @@ build:
 	mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/podpourpi ./cmd/podpourpi
 
+.PHONY: ui
+ui: ui/node_modules
+	cd ui && npm run build
+
+ui/node_modules:
+	cd ui && npm install
+
 clean:
 	rm -rf "$(CURDIR)/build"
 

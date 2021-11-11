@@ -24,3 +24,18 @@ func writeJSONResponse(w http.ResponseWriter, status int, dto interface{}) (err 
 	w.WriteHeader(status)
 	return nil
 }
+
+func notFound(w http.ResponseWriter, msg string) error {
+	return writeJSONResponse(w, http.StatusNotFound, Error{
+		Type:    "NotFound",
+		Message: msg,
+	})
+}
+
+func internalServerError(w http.ResponseWriter, err error) error {
+	_ = writeJSONResponse(w, http.StatusNotFound, Error{
+		Type:    "InternalServerError",
+		Message: "(see server logs)",
+	})
+	return err
+}
