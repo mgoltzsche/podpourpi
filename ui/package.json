@@ -1,13 +1,21 @@
 {
   "name": "podpourpi",
   "version": "0.1.0",
+  "url": "https://github.com/mgoltzsche/podpourpi",
   "private": true,
+  "config": {
+    "openapi": "../spec/openapi.yaml"
+  },
   "scripts": {
+    "openapi:validate": "spectral lint -r spectral.openapi.yaml \"$npm_package_config_openapi\"",
+    "openapi:generate": "openapi --input \"$npm_package_config_openapi\" --output ./src/client --client fetch",
+    "openapi:mock": "prism mock \"$npm_package_config_openapi\"",
     "serve": "vue-cli-service serve",
     "build": "vue-cli-service build",
     "test:unit": "vue-cli-service test:unit",
     "test:e2e": "vue-cli-service test:e2e",
-    "lint": "vue-cli-service lint"
+    "lint": "vue-cli-service lint",
+    "vti": "vti diagnostics"
   },
   "dependencies": {
     "core-js": "^3.6.5",
@@ -17,6 +25,8 @@
     "vuex": "^4.0.0-0"
   },
   "devDependencies": {
+    "@stoplight/prism-cli": "^4.6.0",
+    "@stoplight/spectral-cli": "^6.1.0",
     "@types/jest": "^24.0.19",
     "@typescript-eslint/eslint-plugin": "^4.18.0",
     "@typescript-eslint/parser": "^4.18.0",
@@ -33,9 +43,11 @@
     "@vue/test-utils": "^2.0.0-0",
     "eslint": "^6.7.2",
     "eslint-plugin-vue": "^7.0.0",
+    "openapi-typescript-codegen": "^0.12.0-beta",
     "sass": "^1.26.5",
     "sass-loader": "^8.0.2",
     "typescript": "~4.1.5",
+    "vti": "^0.1.5",
     "vue-jest": "^5.0.0-0"
   }
 }
