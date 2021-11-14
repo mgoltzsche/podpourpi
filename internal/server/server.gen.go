@@ -11,6 +11,15 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Defines values for EventAction.
+const (
+	EventActionCreate EventAction = "create"
+
+	EventActionRemove EventAction = "remove"
+
+	EventActionUpdate EventAction = "update"
+)
+
 // Defines values for Phase.
 const (
 	PhaseFailed Phase = "failed"
@@ -55,6 +64,26 @@ type Error struct {
 	Type    string `json:"type"`
 }
 
+// Event defines model for Event.
+type Event struct {
+	Action EventAction `json:"action"`
+	Object EventObject `json:"object"`
+	Type   string      `json:"type"`
+}
+
+// EventAction defines model for Event.Action.
+type EventAction string
+
+// EventList defines model for EventList.
+type EventList struct {
+	Items []Event `json:"items"`
+}
+
+// EventObject defines model for EventObject.
+type EventObject struct {
+	App *App `json:"app,omitempty"`
+}
+
 // Metadata defines model for Metadata.
 type Metadata struct {
 	// The object identifier
@@ -81,6 +110,9 @@ type ServerInterface interface {
 	// Update app
 	// (PUT /v1/apps/{name})
 	UpdateApp(ctx echo.Context, name string) error
+	// Watch changes
+	// (GET /v1/events)
+	Watch(ctx echo.Context) error
 }
 
 // ServerInterfaceWrapper converts echo contexts to parameters.
@@ -129,6 +161,15 @@ func (w *ServerInterfaceWrapper) UpdateApp(ctx echo.Context) error {
 	return err
 }
 
+// Watch converts echo context to params.
+func (w *ServerInterfaceWrapper) Watch(ctx echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshalled arguments
+	err = w.Handler.Watch(ctx)
+	return err
+}
+
 // This is a simple interface which specifies echo.Route addition functions which
 // are present on both echo.Echo and echo.Group, since we want to allow using
 // either of them for path registration
@@ -160,5 +201,6 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.GET(baseURL+"/v1/apps", wrapper.ListApps)
 	router.GET(baseURL+"/v1/apps/:name", wrapper.GetApp)
 	router.PUT(baseURL+"/v1/apps/:name", wrapper.UpdateApp)
+	router.GET(baseURL+"/v1/events", wrapper.Watch)
 
 }

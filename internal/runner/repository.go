@@ -6,12 +6,20 @@ import (
 	"sync"
 )
 
+type ResourceEventType string
+
+const (
+	EventTypeCreated = ResourceEventType("created")
+	EventTypeUpdated = ResourceEventType("updated")
+	EventTypeDeleted = ResourceEventType("deleted")
+	EventTypeSynced  = ResourceEventType("synced")
+)
+
 type NotFoundError struct {
 	error
 }
 
 type Resource interface {
-	GetName() string
 	DeepCopyIntoResource(Resource) error
 }
 
@@ -19,26 +27,39 @@ type ResourceList interface {
 	SetItems([]Resource) error
 }
 
+type WatchEvent struct {
+	Action   ResourceEventType
+	Resource Resource
+}
+
 type Repository struct {
-	items map[string]Resource
-	mutex *sync.RWMutex
+	items  map[string]Resource
+	mutex  *sync.RWMutex
+	pubsub *Pubsub
 }
 
-func NewRepository() *Repository {
-	return &Repository{items: map[string]Resource{}, mutex: &sync.RWMutex{}}
-}
-
-func (r *Repository) List(l ResourceList) error {
-	items := make([]Resource, 0, len(r.items))
-	names := make([]string, 0, len(r.items))
-	for _, item := range r.items {
-		names = append(names, item.GetName())
+func NewRepository(pubsub *Pubsub) *Repository {
+	return &Repository{
+		items:  map[string]Resource{},
+		mutex:  &sync.RWMutex{},
+		pubsub: pubsub,
 	}
-	sort.Strings(names)
-	for _, k := range names {
+}
+
+func (r *Repository) List(l ResourceList) ([]Resource, error) {
+	items := make([]Resource, 0, len(r.items))
+	keys := make([]string, 0, len(r.items))
+	for k := range r.items {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
 		items = append(items, r.items[k])
 	}
-	return l.SetItems(items)
+	if l == nil {
+		return items, nil
+	}
+	return items, l.SetItems(items)
 }
 
 func (r *Repository) Get(name string, res Resource) error {
@@ -51,37 +72,48 @@ func (r *Repository) Get(name string, res Resource) error {
 	return item.DeepCopyIntoResource(res)
 }
 
-func (r *Repository) Set(name string, item Resource) {
+func (r *Repository) Set(key string, item Resource) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	r.items[name] = item
+	existing := r.items[key]
+	r.items[key] = item
+	if existing == nil {
+		r.emit(EventTypeCreated, item)
+		return
+	}
+	r.emit(EventTypeUpdated, item)
 }
 
-func (r *Repository) Upsert(name string, res Resource, modify func()) error {
+func (r *Repository) Delete(key string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	if existing := r.items[name]; existing != nil {
+	existing := r.items[key]
+	delete(r.items, key)
+	if existing != nil {
+		r.emit(EventTypeDeleted, existing)
+	}
+}
+
+func (r *Repository) Upsert(key string, res Resource, modify func()) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	existing := r.items[key]
+	if existing != nil { // update
 		err := existing.DeepCopyIntoResource(res)
 		if err != nil {
 			return err
 		}
 	}
 	modify()
-	r.items[name] = res
+	r.items[key] = res
+	if existing == nil {
+		r.emit(EventTypeCreated, res)
+		return nil
+	}
+	r.emit(EventTypeUpdated, res)
 	return nil
 }
 
-/*func Copy(from, to interface{}) error {
-	if from == nil {
-		return nil
-	}
-	b, err := json.Marshal(from)
-	if err != nil {
-		return fmt.Errorf("copy struct: marshal: %w", err)
-	}
-	err = json.Unmarshal(b, to)
-	if err != nil {
-		return fmt.Errorf("copy struct: unmarshal: %w", err)
-	}
-	return nil
-}*/
+func (r *Repository) emit(action ResourceEventType, res Resource) {
+	r.pubsub.Publish(WatchEvent{Action: action, Resource: res})
+}

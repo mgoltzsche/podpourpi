@@ -39,3 +39,36 @@ func internalServerError(w http.ResponseWriter, err error) error {
 	})
 	return err
 }
+
+func stream(w http.ResponseWriter) *streamResponse {
+	w.Header().Set("Content-Type", "application/json+stream; charset=UTF-8")
+	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	return &streamResponse{writer: w}
+}
+
+type streamResponse struct {
+	writer http.ResponseWriter
+}
+
+func (r *streamResponse) Write(dto interface{}) (err error) {
+	var b []byte
+	if dto != nil {
+		b, err = json.Marshal(dto)
+		if err != nil {
+			return err
+		}
+		_, err = r.writer.Write([]byte(string(b) + "\n"))
+		if err != nil {
+			return err
+		}
+		f, ok := r.writer.(http.Flusher)
+		if !ok {
+			return fmt.Errorf("ResponseWriter is not a Flusher")
+		}
+		// The writer must be flushed to emit the event to the client immediately.
+		f.Flush()
+	}
+	return nil
+}

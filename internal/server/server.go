@@ -29,10 +29,11 @@ func RunServer(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	apps := runner.NewRepository()
+	pubsub := &runner.Pubsub{}
+	apps := runner.NewRepository(pubsub)
 	containers := runner.WatchContainers(ctx, dockerClient)
 	runner.AggregateAppsFromComposeContainers(containers, apps)
-	controller := &AppController{apps: apps}
+	controller := NewAPIController(pubsub, apps)
 
 	srv := &http.Server{
 		Addr: opts.Address,

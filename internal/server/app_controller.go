@@ -21,7 +21,7 @@ func NewAppController(apps *runner.Repository) *AppController {
 // ListApps lists all apps.
 func (c *AppController) ListApps(ctx echo.Context) error {
 	var apps runner.AppList
-	err := c.apps.List(&apps)
+	_, err := c.apps.List(&apps)
 	if err != nil {
 		return err
 	}
@@ -53,8 +53,16 @@ func (c *AppController) UpdateApp(ctx echo.Context, name string) error {
 }
 
 func toAppDTO(a *runner.App) App {
+	containers := make([]Container, len(a.Status.Containers))
+	for i, c := range a.Status.Containers {
+		containers[i] = Container{
+			Name: c.Name,
+		}
+	}
 	return App{
 		Metadata: Metadata{Name: a.Name},
-		// TODO: map container status
+		Status: AppStatus{
+			Containers: &containers,
+		},
 	}
 }

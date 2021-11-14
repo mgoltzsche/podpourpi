@@ -17,6 +17,22 @@ tags:
   description: App operations
 
 paths:
+  "/v1/events":
+    get:
+      summary: Watch changes
+      description: Stream all changes
+      operationId: watch
+      responses:
+        "200":
+          description: |
+            Stream all change events.
+            The response payload may contain multiple objects, each on a separate line.
+            The first emitted event list object hold a created event for each object on the server.
+            Subsequently emitted event list objects contain one event only or an empty list to keep the connection alive.
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/EventList"
   "/v1/apps":
     get:
       summary: List apps
@@ -171,3 +187,34 @@ components:
       required:
       - type
       - message
+    EventList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+      required:
+      - items
+    Event:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+          - create
+          - remove
+          - update
+        type:
+          type: string
+        object:
+          $ref: "#/components/schemas/EventObject"
+      required:
+      - action
+      - type
+      - object
+    EventObject:
+      type: object
+      properties:
+        app:
+          $ref: "#/components/schemas/App"

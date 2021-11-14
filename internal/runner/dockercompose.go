@@ -95,11 +95,11 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Reposito
 		for evt := range ch {
 			switch evt.Type {
 			case EventTypeContainerAdd, EventTypeContainerDel:
-				appName, _ := appNameFromContainer(evt.Container)
+				appName, composeSvc := appNameFromContainer(evt.Container)
 				var app App
 				err := repo.Upsert(appName, &app, func() {
 					app.Name = appName
-					app.Status.Containers = nil // TODO
+					upsertContainer(&app.Status.Containers, evt.Container, composeSvc)
 				})
 				if err != nil {
 					log.Println("error: containers2apps:", err)
@@ -118,4 +118,19 @@ func appNameFromContainer(c *Container) (composeProject string, composeService s
 		composeService = l["com.docker.compose.service"]
 	}
 	return
+}
+
+func upsertContainer(containers *[]AppContainer, add *Container, composeSvc string) {
+	newContainer := AppContainer{
+		ID:    add.ID,
+		Name:  composeSvc, // TODO: provide name here
+		State: AppState(add.Status),
+	}
+	for i, c := range *containers {
+		if c.ID == c.ID {
+			(*containers)[i] = newContainer
+			return
+		}
+	}
+	*containers = append(*containers, newContainer)
 }

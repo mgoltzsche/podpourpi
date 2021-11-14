@@ -22,14 +22,10 @@ type App struct {
 	Status AppStatus
 }
 
-func (a *App) GetName() string {
-	return a.Name
-}
-
 func (a *App) DeepCopyIntoResource(dest Resource) error {
 	out, ok := dest.(*App)
 	if !ok {
-		return fmt.Errorf("deep copy: unexpected target type %T provided", dest)
+		return fmt.Errorf("deep copy: unexpected target type %T provided, expected %T", dest, a)
 	}
 	a.DeepCopyInto(out)
 	return nil

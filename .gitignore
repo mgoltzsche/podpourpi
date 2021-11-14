@@ -3,3 +3,4 @@
 !/cmd/*/*.go
 *.png
 node_modules
+ui/src/client

@@ -25,6 +25,9 @@ build:
 ui: ui/node_modules
 	cd ui && npm run build
 
+ui-generate:
+	cd ui && npm run openapi:generate
+
 ui-lint: ui/node_modules
 	cd ui && npm run vti && npm run lint
 

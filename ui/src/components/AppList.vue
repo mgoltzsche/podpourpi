@@ -2,30 +2,17 @@
   <div class="apps">
     <h1>Apps</h1>
     <ul id="appslist">
-      <li v-for="app in apps" :key="app.id">
-        {{ app.id }}
+      <li v-for="app in $store.state.apps" :key="app.metadata.name">
+        {{ app.metadata.name }}
       </li>
     </ul>
   </div>
 </template>
 
 <script lang="ts">
-import { Options, Vue } from 'vue-class-component';
+import { Vue } from 'vue-class-component'
 
-class App {
-	id: string
-	constructor(id: string) {
-		this.id = id
-	}
-}
-
-@Options({
-  props: {
-  }
-})
-export default class AppList extends Vue {
-  apps: App[] = [{id: "fake-app1"}, {id: "fake-app2"}]
-}
+export default class AppList extends Vue {}
 </script>
 
 <!-- Add "scoped" attribute to limit CSS to this component only -->
