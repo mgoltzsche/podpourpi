@@ -12,7 +12,7 @@ export const store = createStore<State>({
   },
   mutations: {
     // TODO: implement mutation here that imports data
-    /*update: function(events: EventList) {
+    /*applyEvents: function(events: EventList) {
 
     }*/
   }

@@ -47,6 +47,7 @@ func (c *APIController) Watch(ctx echo.Context) error {
 				Action: EventAction(change.Action),
 				Object: toEventObjectDTO(change.Resource),
 			}}}
+			// TODO: emit keep-alive message (empty event list)
 		}
 		close(ch)
 	}()
