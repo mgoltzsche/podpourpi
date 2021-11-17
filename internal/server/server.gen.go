@@ -15,7 +15,7 @@ import (
 const (
 	EventActionCreate EventAction = "create"
 
-	EventActionRemove EventAction = "remove"
+	EventActionDelete EventAction = "delete"
 
 	EventActionUpdate EventAction = "update"
 )
@@ -71,7 +71,7 @@ type Event struct {
 	Type   string      `json:"type"`
 }
 
-// EventAction defines model for Event.Action.
+// EventAction defines model for EventAction.
 type EventAction string
 
 // EventList defines model for EventList.

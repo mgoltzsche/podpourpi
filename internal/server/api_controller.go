@@ -33,8 +33,7 @@ func (c *APIController) Watch(ctx echo.Context) error {
 			for _, item := range items {
 				// Emit event for each object the store contains
 				syncState = append(syncState, Event{
-					// TODO: map evt.action properly
-					Action: EventAction(runner.EventTypeCreated),
+					Action: EventActionCreate,
 					Object: toEventObjectDTO(item),
 				})
 			}

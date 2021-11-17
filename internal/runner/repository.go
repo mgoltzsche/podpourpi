@@ -9,10 +9,9 @@ import (
 type ResourceEventType string
 
 const (
-	EventTypeCreated = ResourceEventType("created")
-	EventTypeUpdated = ResourceEventType("updated")
-	EventTypeDeleted = ResourceEventType("deleted")
-	EventTypeSynced  = ResourceEventType("synced")
+	EventTypeCreated = ResourceEventType("create")
+	EventTypeUpdated = ResourceEventType("update")
+	EventTypeDeleted = ResourceEventType("delete")
 )
 
 type NotFoundError struct {

@@ -200,11 +200,7 @@ components:
       type: object
       properties:
         action:
-          type: string
-          enum:
-          - create
-          - remove
-          - update
+          $ref: "#/components/schemas/EventAction"
         type:
           type: string
         object:
@@ -213,6 +209,12 @@ components:
       - action
       - type
       - object
+    EventAction:
+      type: string
+      enum:
+      - create
+      - update
+      - delete
     EventObject:
       type: object
       properties:

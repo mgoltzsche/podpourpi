@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -94,7 +94,7 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Reposito
 	go func() {
 		for evt := range ch {
 			switch evt.Type {
-			case EventTypeContainerAdd, EventTypeContainerDel:
+			case EventTypeContainerAdd:
 				appName, composeSvc := appNameFromContainer(evt.Container)
 				var app App
 				err := repo.Upsert(appName, &app, func() {
@@ -102,10 +102,30 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Reposito
 					upsertContainer(&app.Status.Containers, evt.Container, composeSvc)
 				})
 				if err != nil {
-					log.Println("error: containers2apps:", err)
+					logrus.WithError(err).Errorf("failed to upsert app")
+					continue
+				}
+			case EventTypeContainerDel:
+				appName, _ := appNameFromContainer(evt.Container)
+				var app App
+				err := repo.Upsert(appName, &app, func() {
+					containers := make([]AppContainer, 0, len(app.Status.Containers))
+					for _, c := range app.Status.Containers {
+						if c.ID != evt.Container.ID {
+							containers = append(containers, c)
+						}
+					}
+					app.Status.Containers = containers
+				})
+				if err != nil {
+					logrus.WithError(err).Error("failed to delete container from app")
+					continue
+				}
+				if len(app.Status.Containers) == 0 {
+					repo.Delete(appName)
 				}
 			case EventTypeError:
-				log.Println("error: containers2apps:", evt.Error)
+				logrus.WithError(evt.Error).Error("received docker error event")
 			}
 		}
 	}()

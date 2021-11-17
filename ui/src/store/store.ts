@@ -1,6 +1,4 @@
-import { InjectionKey } from 'vue'
 import {
-  useStore as baseUseStore,
   createStore,
   Store as VuexStore,
   CommitOptions,
@@ -30,11 +28,4 @@ export type Store = Omit<
   getters: {
     [K in keyof Getters]: ReturnType<Getters[K]>
   }
-}
-
-// store injection key
-export const key: InjectionKey<VuexStore<State>> = Symbol()
-
-export function useStore(): VuexStore<State> {
-  return baseUseStore(key)
 }

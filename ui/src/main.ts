@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { store, key } from './store'
+import { MutationTypes } from './store/mutations'
 import { EventList } from './client/models/EventList'
 
 const app = createApp(App)
@@ -13,7 +14,7 @@ watchServerChanges()
 function watchServerChanges() {
   fetch('/api/v1/events')
     .then(readChunkedResponse)
-    .catch(handleEventFetchError)
+    .catch(handleWatchError)
 }
 
 function readChunkedResponse(response: Response) {
@@ -54,14 +55,12 @@ function readChunkedResponse(response: Response) {
       return
     }
     const events: EventList = JSON.parse(rawMsg)
-    console.log("message: ", events.items)
-    events.items.forEach(e => {
-      // TODO: write apps into store - call store mutator function that does that
-    })
+    console.log('message:', events.items)
+    store.commit(MutationTypes.SYNC_DATA, events.items)
   }
 }
 
-function handleEventFetchError(error: Error) {
+function handleWatchError(error: Error) {
   console.log('ERROR: server sync failed: ', error)
   setTimeout(watchServerChanges, 1000) // retry after 1s
 }
