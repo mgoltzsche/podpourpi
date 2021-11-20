@@ -20,18 +20,18 @@ export const mutations: MutationTree<State> & Mutations = {
     }
     events.forEach(evt => {
       if (evt.object.app) {
-        console.log('add', evt.object.app)
-        state.apps = applyChange(state.apps, evt.action, evt.object.app)
+        state.apps = applyChange('app', state.apps, evt.action, evt.object.app)
       }
     })
   },
 }
 
-function applyChange<T extends Resource>(items: Array<T>, action: EventAction, o: T) {
+function applyChange<T extends Resource>(typeName: string, items: Array<T>, action: EventAction, o: T) {
   if (o.metadata.name == '') {
     o.metadata.name = '<unknown>'
   }
   // TODO: don't replace items - otherwise UI looses track
+  console.log('mutate:', action, typeName, o)
   switch(action) {
     case EventAction.CREATE:
       items.push(o)

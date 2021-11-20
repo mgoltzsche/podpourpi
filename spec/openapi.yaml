@@ -30,7 +30,7 @@ paths:
             The first emitted event list object hold a created event for each object on the server.
             Subsequently emitted event list objects contain one event only or an empty list to keep the connection alive.
           content:
-            "application/json":
+            "application/json+stream":
               schema:
                 $ref: "#/components/schemas/EventList"
   "/v1/apps":

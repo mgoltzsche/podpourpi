@@ -22,14 +22,19 @@ build:
 	go build -o $(BIN_DIR)/podpourpi ./cmd/podpourpi
 
 .PHONY: ui
-ui: ui/node_modules
+ui: ui-build ui-type-check
+
+ui-build: ui/node_modules
 	cd ui && npm run build
 
-ui-generate:
+ui-generate: ui/node_modules
 	cd ui && npm run openapi:generate
 
 ui-lint: ui/node_modules
-	cd ui && npm run vti && npm run lint
+	cd ui && npm run lint
+
+ui-type-check: ui/node_modules
+	cd ui && npm run vti
 
 ui/node_modules:
 	cd ui && npm install

@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 )
@@ -14,7 +16,12 @@ const (
 	EventTypeDeleted = ResourceEventType("delete")
 )
 
-type NotFoundError struct {
+func IsNotFound(err error) bool {
+	var notFound *notFoundError
+	return errors.As(err, &notFound)
+}
+
+type notFoundError struct {
 	error
 }
 
@@ -31,21 +38,31 @@ type WatchEvent struct {
 	Resource Resource
 }
 
-type Repository struct {
-	items  map[string]Resource
-	mutex  *sync.RWMutex
-	pubsub *Pubsub
+type Store interface {
+	List(l ResourceList) ([]Resource, error)
+	Get(key string, res Resource) error
+	Set(key string, res Resource)
+	Delete(key string)
+	Modify(key string, res Resource, modify func() (bool, error)) error
 }
 
-func NewRepository(pubsub *Pubsub) *Repository {
-	return &Repository{
-		items:  map[string]Resource{},
+type store struct {
+	items  map[string]Resource
+	pubsub *Pubsub
+	mutex  *sync.RWMutex
+}
+
+func NewStore(pubsub *Pubsub) Store {
+	return &store{
 		mutex:  &sync.RWMutex{},
+		items:  map[string]Resource{},
 		pubsub: pubsub,
 	}
 }
 
-func (r *Repository) List(l ResourceList) ([]Resource, error) {
+func (r *store) List(l ResourceList) ([]Resource, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 	items := make([]Resource, 0, len(r.items))
 	keys := make([]string, 0, len(r.items))
 	for k := range r.items {
@@ -61,17 +78,17 @@ func (r *Repository) List(l ResourceList) ([]Resource, error) {
 	return items, l.SetItems(items)
 }
 
-func (r *Repository) Get(name string, res Resource) error {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
+func (r *store) Get(name string, res Resource) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 	item := r.items[name]
 	if item == nil {
-		return &NotFoundError{fmt.Errorf("resource %q not found", name)}
+		return &notFoundError{fmt.Errorf("resource %q not found", name)}
 	}
 	return item.DeepCopyIntoResource(res)
 }
 
-func (r *Repository) Set(key string, item Resource) {
+func (r *store) Set(key string, item Resource) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	existing := r.items[key]
@@ -80,10 +97,12 @@ func (r *Repository) Set(key string, item Resource) {
 		r.emit(EventTypeCreated, item)
 		return
 	}
-	r.emit(EventTypeUpdated, item)
+	if !reflect.DeepEqual(existing, item) {
+		r.emit(EventTypeUpdated, item)
+	}
 }
 
-func (r *Repository) Delete(key string) {
+func (r *store) Delete(key string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	existing := r.items[key]
@@ -93,7 +112,7 @@ func (r *Repository) Delete(key string) {
 	}
 }
 
-func (r *Repository) Upsert(key string, res Resource, modify func()) error {
+func (r *store) Modify(key string, res Resource, modify func() (bool, error)) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	existing := r.items[key]
@@ -103,16 +122,28 @@ func (r *Repository) Upsert(key string, res Resource, modify func()) error {
 			return err
 		}
 	}
-	modify()
+	keep, err := modify()
+	if err != nil {
+		return err
+	}
+	if !keep {
+		if existing != nil {
+			delete(r.items, key)
+			r.emit(EventTypeDeleted, res)
+		}
+		return nil
+	}
 	r.items[key] = res
 	if existing == nil {
 		r.emit(EventTypeCreated, res)
 		return nil
 	}
-	r.emit(EventTypeUpdated, res)
+	if !reflect.DeepEqual(existing, res) {
+		r.emit(EventTypeUpdated, res)
+	}
 	return nil
 }
 
-func (r *Repository) emit(action ResourceEventType, res Resource) {
+func (r *store) emit(action ResourceEventType, res Resource) {
 	r.pubsub.Publish(WatchEvent{Action: action, Resource: res})
 }

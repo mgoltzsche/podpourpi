@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -90,25 +91,18 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Repository) {
+func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo Store) {
 	go func() {
 		for evt := range ch {
-			switch evt.Type {
-			case EventTypeContainerAdd:
-				appName, composeSvc := appNameFromContainer(evt.Container)
-				var app App
-				err := repo.Upsert(appName, &app, func() {
+			appName, composeSvc := appNameFromContainer(evt.Container)
+			var app App
+			err := repo.Modify(appName, &app, func() (bool, error) {
+				switch evt.Type {
+				case EventTypeContainerAdd:
 					app.Name = appName
 					upsertContainer(&app.Status.Containers, evt.Container, composeSvc)
-				})
-				if err != nil {
-					logrus.WithError(err).Errorf("failed to upsert app")
-					continue
-				}
-			case EventTypeContainerDel:
-				appName, _ := appNameFromContainer(evt.Container)
-				var app App
-				err := repo.Upsert(appName, &app, func() {
+					return true, nil
+				case EventTypeContainerDel:
 					containers := make([]AppContainer, 0, len(app.Status.Containers))
 					for _, c := range app.Status.Containers {
 						if c.ID != evt.Container.ID {
@@ -116,16 +110,14 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Reposito
 						}
 					}
 					app.Status.Containers = containers
-				})
-				if err != nil {
-					logrus.WithError(err).Error("failed to delete container from app")
-					continue
+					return len(containers) > 0, nil
+				case EventTypeError:
+					return false, fmt.Errorf("received docker error event: %w", evt.Error)
 				}
-				if len(app.Status.Containers) == 0 {
-					repo.Delete(appName)
-				}
-			case EventTypeError:
-				logrus.WithError(evt.Error).Error("received docker error event")
+				return false, fmt.Errorf("received unexpected event type %q", evt.Type)
+			})
+			if err != nil {
+				logrus.WithError(err).Error("failed to stream container into app status")
 			}
 		}
 	}()
@@ -133,6 +125,9 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo *Reposito
 }
 
 func appNameFromContainer(c *Container) (composeProject string, composeService string) {
+	if c == nil {
+		return
+	}
 	if l := c.Labels; l != nil {
 		composeProject = l["com.docker.compose.project"]
 		composeService = l["com.docker.compose.service"]
@@ -143,11 +138,11 @@ func appNameFromContainer(c *Container) (composeProject string, composeService s
 func upsertContainer(containers *[]AppContainer, add *Container, composeSvc string) {
 	newContainer := AppContainer{
 		ID:    add.ID,
-		Name:  composeSvc, // TODO: provide name here
+		Name:  composeSvc,
 		State: AppState(add.Status),
 	}
 	for i, c := range *containers {
-		if c.ID == c.ID {
+		if c.ID == add.ID {
 			(*containers)[i] = newContainer
 			return
 		}

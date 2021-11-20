@@ -43,6 +43,8 @@ func internalServerError(w http.ResponseWriter, err error) error {
 func stream(w http.ResponseWriter) *streamResponse {
 	w.Header().Set("Content-Type", "application/json+stream; charset=UTF-8")
 	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("Connection", "Keep-Alive")
+	w.Header().Set("Keep-Alive", "timeout=60")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	return &streamResponse{writer: w}

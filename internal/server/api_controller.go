@@ -9,15 +9,15 @@ import (
 type APIController struct {
 	*AppController
 	pubsub *runner.Pubsub
-	stores []*runner.Repository
+	stores []runner.Store
 }
 
 // NewAPIController creates a new app controller.
-func NewAPIController(pubsub *runner.Pubsub, apps *runner.Repository) *APIController {
-	nodes := runner.NewRepository(pubsub)
+func NewAPIController(pubsub *runner.Pubsub, apps runner.Store) *APIController {
+	nodes := runner.NewStore(pubsub)
 	return &APIController{
 		AppController: NewAppController(apps),
-		stores:        []*runner.Repository{nodes, apps},
+		stores:        []runner.Store{nodes, apps},
 		pubsub:        pubsub,
 	}
 }

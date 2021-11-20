@@ -30,7 +30,7 @@ func RunServer(ctx context.Context, opts Options) error {
 		return err
 	}
 	pubsub := &runner.Pubsub{}
-	apps := runner.NewRepository(pubsub)
+	apps := runner.NewStore(pubsub)
 	containers := runner.WatchContainers(ctx, dockerClient)
 	runner.AggregateAppsFromComposeContainers(containers, apps)
 	controller := NewAPIController(pubsub, apps)

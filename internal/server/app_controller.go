@@ -1,7 +1,6 @@
 package server
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -10,11 +9,11 @@ import (
 
 // AppController implements all server handlers.
 type AppController struct {
-	apps *runner.Repository
+	apps runner.Store
 }
 
 // NewAppController creates a new app controller.
-func NewAppController(apps *runner.Repository) *AppController {
+func NewAppController(apps runner.Store) *AppController {
 	return &AppController{apps: apps}
 }
 
@@ -38,8 +37,7 @@ func (c *AppController) GetApp(ctx echo.Context, name string) error {
 	var app runner.App
 	err := c.apps.Get(name, &app)
 	if err != nil {
-		var notFoundErr *runner.NotFoundError
-		if errors.As(err, &notFoundErr) {
+		if runner.IsNotFound(err) {
 			return notFound(w, err.Error())
 		}
 		return internalServerError(w, err)

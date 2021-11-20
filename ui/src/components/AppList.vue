@@ -3,7 +3,7 @@
     <h1>Apps</h1>
     <ul id="appslist">
       <li v-for="app in $store.state.apps" :key="app.metadata.name">
-        {{ app.metadata.name }}
+        {{app.metadata.name}}({{app.status.containers?.length}})
       </li>
     </ul>
   </div>
