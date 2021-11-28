@@ -32,12 +32,18 @@ const (
 // App defines model for App.
 type App struct {
 	Metadata Metadata  `json:"metadata"`
+	Spec     AppSpec   `json:"spec"`
 	Status   AppStatus `json:"status"`
 }
 
 // AppList defines model for AppList.
 type AppList struct {
 	Items []App `json:"items"`
+}
+
+// AppSpec defines model for AppSpec.
+type AppSpec struct {
+	ActiveProfile string `json:"activeProfile"`
 }
 
 // AppStatus defines model for AppStatus.

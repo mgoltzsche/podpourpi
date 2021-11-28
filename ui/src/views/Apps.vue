@@ -1,5 +1,8 @@
 <template>
-  <AppList/>
+  <div class="row">
+    <AppList class="col-xs-0 col-sm"/>
+    <router-view class="col-xs-12 col-sm-7 col-md-8"/>
+  </div>
 </template>
 
 <script lang="ts">

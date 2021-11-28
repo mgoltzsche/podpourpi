@@ -59,6 +59,9 @@ func toAppDTO(a *runner.App) App {
 	}
 	return App{
 		Metadata: Metadata{Name: a.Name},
+		Spec: AppSpec{
+			ActiveProfile: "default",
+		},
 		Status: AppStatus{
 			Containers: &containers,
 		},

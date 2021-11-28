@@ -137,14 +137,26 @@ components:
       properties:
         metadata:
           $ref: "#/components/schemas/Metadata"
+        spec:
+          $ref: "#/components/schemas/AppSpec"
         status:
           $ref: "#/components/schemas/AppStatus"
       required:
       - metadata
+      - spec
       - status
+    AppSpec:
+      type: object
+      properties:
+        activeProfile:
+          type: string
+      required:
+      - activeProfile
     AppStatus:
       type: object
       properties:
+        node:
+          type: string
         phase:
           $ref: "#/components/schemas/Phase"
         containers:
