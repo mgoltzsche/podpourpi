@@ -79,13 +79,20 @@ func WatchContainers(ctx context.Context, dockerClient *client.Client) <-chan Co
 				}
 				if msg.Scope == "local" && msg.Type == events.ContainerEventType && msg.Actor.ID != "" {
 					// TODO: unify container status - load container from disk?
+					id := msg.Actor.ID
+					status := msg.Action
+					c, err := dockerClient.ContainerInspect(ctx, id)
+					if err == nil && c.State != nil {
+						status = c.State.Status
+					}
+
 					evtType := EventTypeContainerAdd
 					if msg.Action == "destroy" {
 						evtType = EventTypeContainerDel
 					}
 					ch <- ContainerEvent{
 						Type:      evtType,
-						Container: &Container{ID: msg.Actor.ID, Labels: msg.Actor.Attributes, Status: msg.Action},
+						Container: &Container{ID: id, Labels: msg.Actor.Attributes, Status: status},
 					}
 				} else {
 					log.Printf("ignored docker event: %#v\n", msg)

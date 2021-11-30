@@ -14,10 +14,11 @@ import (
 )
 
 type Options struct {
-	Address    string
-	DockerHost string
-	UIDir      string
-	Logger     *logrus.Entry
+	Address        string
+	DockerHost     string
+	ComposeAppRoot string
+	UIDir          string
+	Logger         *logrus.Entry
 }
 
 func RunServer(ctx context.Context, opts Options) error {
@@ -31,9 +32,18 @@ func RunServer(ctx context.Context, opts Options) error {
 	}
 	pubsub := &runner.Pubsub{}
 	apps := runner.NewStore(pubsub)
+	composeRunner := runner.NewDockerComposeRunner(opts.ComposeAppRoot)
+	composeApps, err := composeRunner.Apps()
+	if err != nil {
+		return err
+	}
+	for _, a := range composeApps {
+		app := a
+		apps.Set(a.Name, &app)
+	}
 	containers := runner.WatchContainers(ctx, dockerClient)
 	runner.AggregateAppsFromComposeContainers(containers, apps)
-	controller := NewAPIController(pubsub, apps)
+	controller := NewAPIController(pubsub, apps, composeRunner)
 
 	srv := &http.Server{
 		Addr: opts.Address,

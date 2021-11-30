@@ -4,22 +4,41 @@ import (
 	"fmt"
 )
 
-type AppState string
+type AppState int
 
 const (
-	AppStateReady    AppState = "ready"
-	AppStateFailed   AppState = "failed"
-	AppStateStarting AppState = "starting"
-	AppStateStopping AppState = "stopping"
+	AppStateUnknown  AppState = iota
+	AppStateDisabled AppState = iota
+	AppStateExited   AppState = iota
+	AppStateReady    AppState = iota
+	AppStateStarting AppState = iota
+	AppStateStopping AppState = iota
+	AppStateError    AppState = iota
 )
+
+var (
+	states = []string{
+		"unknown",
+		"disabled",
+		"exited",
+		"ready",
+		"starting",
+		"stopping",
+		"failed",
+	}
+)
+
+func (a AppState) String() string {
+	return states[int(a)]
+}
 
 // +k8s:deepcopy-gen=true
 type App struct {
-	Name   string
-	Type   string
-	Dir    string
-	Host   string
-	Status AppStatus
+	Name    string
+	Type    string
+	Host    string
+	Enabled bool
+	Status  AppStatus
 }
 
 func (a *App) DeepCopyIntoResource(dest Resource) error {

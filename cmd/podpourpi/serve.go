@@ -10,10 +10,11 @@ import (
 
 func newServeCommand(ctx context.Context, logger *logrus.Entry) *cobra.Command {
 	opts := server.Options{
-		Address:    "127.0.0.1:8080",
-		DockerHost: "unix:///var/run/docker.sock",
-		UIDir:      "./ui",
-		Logger:     logger,
+		Address:        "127.0.0.1:8080",
+		DockerHost:     "unix:///var/run/docker.sock",
+		UIDir:          "./ui",
+		ComposeAppRoot: "/etc/podpourpi/apps",
+		Logger:         logger,
 	}
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -26,6 +27,7 @@ func newServeCommand(ctx context.Context, logger *logrus.Entry) *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&opts.Address, "address", opts.Address, "server listen address")
 	f.StringVar(&opts.DockerHost, "docker-address", opts.DockerHost, "docker client address")
+	f.StringVar(&opts.ComposeAppRoot, "compose-apps", opts.ComposeAppRoot, "directory containing the web UI")
 	f.StringVar(&opts.UIDir, "ui", opts.UIDir, "directory containing the web UI")
 	return cmd
 }

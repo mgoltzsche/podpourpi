@@ -1,21 +1,18 @@
 <template>
-  <div class="app-settings">
+  <div class="app-settings q-pa-md">
     <q-card>
       <q-card-section>
-        <div v-if="app === null">
-          App not specified
+        name: {{app.metadata.name}}
+        <div class="q-gutter-sm">
+          <q-checkbox v-model="app.spec.enabled" label="Enabled" @click="updateApp()"/>
         </div>
-        <div v-if="app !== null">
-          TODO: app details for {{app.metadata.name}}
-        </div>
-        name: {{app?.metadata.name}}
       </q-card-section>
     </q-card>
   </div>
 </template>
 
 <script lang="ts">
-import { App } from '@/client'
+import { ApiError, App, AppsService } from '@/client'
 import { Options, Vue } from 'vue-class-component'
 
 @Options({
@@ -24,6 +21,17 @@ import { Options, Vue } from 'vue-class-component'
   }
 })
 export default class AppSettings extends Vue {
-  app!: App|null
+  app!: App
+
+  updateApp(): void {
+    console.log(`app ${this.app.metadata.name} enabled: ${this.app.spec.enabled}`)
+    AppsService.updateApp(this.app.metadata.name, this.app).catch(e => {
+      let msg = e instanceof ApiError ? `${e.toString()}: ${(e as ApiError).body?.message}` : e.toString()
+      this.$q.notify({
+        type: 'negative',
+        message: msg,
+      })
+    })
+  }
 }
 </script>

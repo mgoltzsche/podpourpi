@@ -13,10 +13,10 @@ type APIController struct {
 }
 
 // NewAPIController creates a new app controller.
-func NewAPIController(pubsub *runner.Pubsub, apps runner.Store) *APIController {
+func NewAPIController(pubsub *runner.Pubsub, apps runner.Store, appRunner runner.AppRunner) *APIController {
 	nodes := runner.NewStore(pubsub)
 	return &APIController{
-		AppController: NewAppController(apps),
+		AppController: NewAppController(apps, appRunner),
 		stores:        []runner.Store{nodes, apps},
 		pubsub:        pubsub,
 	}

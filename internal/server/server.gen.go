@@ -11,6 +11,19 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Defines values for AppState.
+const (
+	AppStateError AppState = "error"
+
+	AppStateExited AppState = "exited"
+
+	AppStateRunning AppState = "running"
+
+	AppStateStarting AppState = "starting"
+
+	AppStateUnknown AppState = "unknown"
+)
+
 // Defines values for EventAction.
 const (
 	EventActionCreate EventAction = "create"
@@ -20,16 +33,7 @@ const (
 	EventActionUpdate EventAction = "update"
 )
 
-// Defines values for Phase.
-const (
-	PhaseFailed Phase = "failed"
-
-	PhaseRunning Phase = "running"
-
-	PhaseStarting Phase = "starting"
-)
-
-// App defines model for App.
+// Represents a set of capabilities that a host provides.
 type App struct {
 	Metadata Metadata  `json:"metadata"`
 	Spec     AppSpec   `json:"spec"`
@@ -44,12 +48,17 @@ type AppList struct {
 // AppSpec defines model for AppSpec.
 type AppSpec struct {
 	ActiveProfile string `json:"activeProfile"`
+	Enabled       bool   `json:"enabled"`
 }
+
+// AppState defines model for AppState.
+type AppState string
 
 // AppStatus defines model for AppStatus.
 type AppStatus struct {
 	Containers *[]Container `json:"containers,omitempty"`
-	Phase      Phase        `json:"phase"`
+	Node       *string      `json:"node,omitempty"`
+	State      AppState     `json:"state"`
 }
 
 // Container defines model for Container.
@@ -60,8 +69,8 @@ type Container struct {
 
 // ContainerStatus defines model for ContainerStatus.
 type ContainerStatus struct {
-	Message *string `json:"message,omitempty"`
-	Phase   Phase   `json:"phase"`
+	Message *string  `json:"message,omitempty"`
+	State   AppState `json:"state"`
 }
 
 // Error defines model for Error.
@@ -74,7 +83,6 @@ type Error struct {
 type Event struct {
 	Action EventAction `json:"action"`
 	Object EventObject `json:"object"`
-	Type   string      `json:"type"`
 }
 
 // EventAction defines model for EventAction.
@@ -87,6 +95,7 @@ type EventList struct {
 
 // EventObject defines model for EventObject.
 type EventObject struct {
+	// Represents a set of capabilities that a host provides.
 	App *App `json:"app,omitempty"`
 }
 
@@ -95,9 +104,6 @@ type Metadata struct {
 	// The object identifier
 	Name string `json:"name"`
 }
-
-// Phase defines model for Phase.
-type Phase string
 
 // UpdateAppJSONBody defines parameters for UpdateApp.
 type UpdateAppJSONBody App

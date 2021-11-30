@@ -24,7 +24,7 @@ build:
 .PHONY: ui
 ui: ui-build ui-type-check
 
-ui-build: ui/node_modules
+ui-build: ui-generate
 	cd ui && npm run build
 
 ui-generate: ui/node_modules

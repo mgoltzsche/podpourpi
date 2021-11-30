@@ -3,18 +3,16 @@
     <q-list>
       <q-item v-for="app in $store.state.apps" :key="app.metadata.name" clickable v-ripple :to="`/apps/${app.metadata.name}`">
         <q-item-section avatar>
-          <q-avatar color="primary" text-color="white">
-            {{ app.status.phase }}
+          <q-avatar :color="color(app)" text-color="white">
           </q-avatar>
         </q-item-section>
 
         <q-item-section>
           <q-item-label lines="1">{{ app.metadata.name }}</q-item-label>
-          <q-item-label caption lines="1">{{app.status.containers?.length}} containers</q-item-label>
+          <q-item-label caption lines="1">{{ app.status.containers?.length }} containers</q-item-label>
         </q-item-section>
-
+          {{ app.status.state }}
         <q-item-section side>
-          <q-icon name="chat_bubble" color="green" />
         </q-item-section>
       </q-item>
     </q-list>
@@ -22,26 +20,21 @@
 </template>
 
 <script lang="ts">
+import { App } from '@/client';
 import { Vue } from 'vue-class-component'
+import { AppState } from '@/client';
+
+let stateColors: {[key in AppState]: string} = {
+  running: 'positive',
+  error: 'negative',
+  starting: 'info',
+  unknown: 'dark',
+  exited: 'gray'
+}
 
 export default class AppList extends Vue {
+  color(a: App): string {
+    return stateColors[a.status.state]
+  }
 }
 </script>
-
-<!-- Add "scoped" attribute to limit CSS to this component only -->
-<style scoped lang="scss">
-h3 {
-  margin: 40px 0 0;
-}
-ul {
-  list-style-type: none;
-  padding: 0;
-}
-li {
-  display: inline-block;
-  margin: 0 10px;
-}
-a {
-  color: #42b983;
-}
-</style>

@@ -42,7 +42,7 @@
           </q-item-section>
           <q-item-section>
             <q-item-label>Apps</q-item-label>
-            <q-item-label caption>Host-local applications</q-item-label>
+            <q-item-label caption>Configure available applications</q-item-label>
           </q-item-section>
         </q-item>
         <q-item to="/nodes">

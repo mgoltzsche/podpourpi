@@ -32,8 +32,15 @@ func notFound(w http.ResponseWriter, msg string) error {
 	})
 }
 
+func badRequest(w http.ResponseWriter, msg string) error {
+	return writeJSONResponse(w, http.StatusBadRequest, Error{
+		Type:    "BadRequest",
+		Message: msg,
+	})
+}
+
 func internalServerError(w http.ResponseWriter, err error) error {
-	_ = writeJSONResponse(w, http.StatusNotFound, Error{
+	_ = writeJSONResponse(w, http.StatusInternalServerError, Error{
 		Type:    "InternalServerError",
 		Message: "(see server logs)",
 	})
