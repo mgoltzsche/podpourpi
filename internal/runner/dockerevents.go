@@ -3,11 +3,11 @@ package runner
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/client"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -95,7 +95,7 @@ func WatchContainers(ctx context.Context, dockerClient *client.Client) <-chan Co
 						Container: &Container{ID: id, Labels: msg.Actor.Attributes, Status: status},
 					}
 				} else {
-					log.Printf("ignored docker event: %#v\n", msg)
+					logrus.Debugf("ignored docker event: %#v", msg)
 				}
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
+	"github.com/mgoltzsche/podpourpi/internal/store"
 	"github.com/sirupsen/logrus"
 )
 
@@ -30,8 +31,8 @@ func RunServer(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	pubsub := &runner.Pubsub{}
-	apps := runner.NewStore(pubsub)
+	pubsub := &store.Pubsub{}
+	apps := store.NewStore(pubsub)
 	composeRunner := runner.NewDockerComposeRunner(opts.ComposeAppRoot)
 	composeApps, err := composeRunner.Apps()
 	if err != nil {

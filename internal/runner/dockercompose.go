@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/mgoltzsche/podpourpi/internal/store"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -85,14 +86,14 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo Store) {
+func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo store.Store) {
 	go func() {
 		for evt := range ch {
 			appName, composeSvc := appNameFromContainer(evt.Container)
-			var app App
 			if appName == "" {
 				continue
 			}
+			var app App
 			err := repo.Modify(appName, &app, func() (bool, error) {
 				switch evt.Type {
 				case EventTypeContainerAdd:

@@ -56,15 +56,16 @@ type AppState string
 
 // AppStatus defines model for AppStatus.
 type AppStatus struct {
-	Containers *[]Container `json:"containers,omitempty"`
-	Node       *string      `json:"node,omitempty"`
-	State      AppState     `json:"state"`
+	Containers []Container `json:"containers"`
+	Node       *string     `json:"node,omitempty"`
+	State      AppState    `json:"state"`
 }
 
 // Container defines model for Container.
 type Container struct {
-	Name   string           `json:"name"`
-	Status *ContainerStatus `json:"status,omitempty"`
+	Id     string          `json:"id"`
+	Name   string          `json:"name"`
+	Status ContainerStatus `json:"status"`
 }
 
 // ContainerStatus defines model for ContainerStatus.

@@ -24,12 +24,12 @@ import { App } from '@/client';
 import { Vue } from 'vue-class-component'
 import { AppState } from '@/client';
 
-let stateColors: {[key in AppState]: string} = {
+export const stateColors: {[key in AppState]: string} = {
   running: 'positive',
   error: 'negative',
   starting: 'info',
   unknown: 'dark',
-  exited: 'gray'
+  exited: 'gray',
 }
 
 export default class AppList extends Vue {

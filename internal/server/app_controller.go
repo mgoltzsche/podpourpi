@@ -7,17 +7,18 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
+	"github.com/mgoltzsche/podpourpi/internal/store"
 	"github.com/sirupsen/logrus"
 )
 
 // AppController implements all server handlers.
 type AppController struct {
-	apps   runner.Store
+	apps   store.Store
 	runner runner.AppRunner
 }
 
 // NewAppController creates a new app controller.
-func NewAppController(apps runner.Store, runner runner.AppRunner) *AppController {
+func NewAppController(apps store.Store, runner runner.AppRunner) *AppController {
 	return &AppController{apps: apps, runner: runner}
 }
 
@@ -41,7 +42,7 @@ func (c *AppController) GetApp(ctx echo.Context, name string) error {
 	var app runner.App
 	err := c.apps.Get(name, &app)
 	if err != nil {
-		if runner.IsNotFound(err) {
+		if store.IsNotFound(err) {
 			return notFound(w, err.Error())
 		}
 		return internalServerError(w, err)
@@ -63,6 +64,9 @@ func (c *AppController) UpdateApp(ctx echo.Context, name string) error {
 		return notFound(w, err.Error())
 	}
 	app.Enabled = dto.Spec.Enabled
+	// TODO: ideally support optimistic locking here to detect if the app is accidentally overwritten
+	c.apps.Set(name, &app)
+	// TODO: move start/stop logic into separate endpoint
 	// TODO: set/apply profile
 	action, err := c.applyApp(ctx.Request().Context(), &app)
 	if err != nil {
@@ -72,7 +76,6 @@ func (c *AppController) UpdateApp(ctx echo.Context, name string) error {
 		})
 		return err
 	}
-	c.apps.Set(name, &app)
 	return writeJSONResponse(w, http.StatusAccepted, toAppDTO(&app))
 }
 
@@ -87,7 +90,11 @@ func toAppDTO(a *runner.App) App {
 	containers := make([]Container, len(a.Status.Containers))
 	for i, c := range a.Status.Containers {
 		containers[i] = Container{
+			Id:   c.ID,
 			Name: c.Name,
+			Status: ContainerStatus{
+				State: toAppState(c.State),
+			},
 		}
 	}
 	return App{
@@ -98,7 +105,7 @@ func toAppDTO(a *runner.App) App {
 		},
 		Status: AppStatus{
 			State:      toAppState(a.Status.State),
-			Containers: &containers,
+			Containers: containers,
 		},
 	}
 }

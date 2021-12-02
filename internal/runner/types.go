@@ -2,6 +2,8 @@ package runner
 
 import (
 	"fmt"
+
+	"github.com/mgoltzsche/podpourpi/internal/store"
 )
 
 type AppState int
@@ -24,7 +26,7 @@ var (
 		"ready",
 		"starting",
 		"stopping",
-		"failed",
+		"error",
 	}
 )
 
@@ -41,7 +43,7 @@ type App struct {
 	Status  AppStatus
 }
 
-func (a *App) DeepCopyIntoResource(dest Resource) error {
+func (a *App) DeepCopyIntoResource(dest store.Resource) error {
 	out, ok := dest.(*App)
 	if !ok {
 		return fmt.Errorf("deep copy: unexpected target type %T provided, expected %T", dest, a)
@@ -55,7 +57,7 @@ type AppList struct {
 	Items []App
 }
 
-func (a *AppList) SetItems(items []Resource) error {
+func (a *AppList) SetItems(items []store.Resource) error {
 	a.Items = make([]App, len(items))
 	for i, item := range items {
 		if err := item.DeepCopyIntoResource(&a.Items[i]); err != nil {

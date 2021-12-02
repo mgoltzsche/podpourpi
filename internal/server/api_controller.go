@@ -3,21 +3,22 @@ package server
 import (
 	"github.com/labstack/echo/v4"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
+	"github.com/mgoltzsche/podpourpi/internal/store"
 )
 
 // APIController implements all server handlers.
 type APIController struct {
 	*AppController
-	pubsub *runner.Pubsub
-	stores []runner.Store
+	pubsub *store.Pubsub
+	stores []store.Store
 }
 
 // NewAPIController creates a new app controller.
-func NewAPIController(pubsub *runner.Pubsub, apps runner.Store, appRunner runner.AppRunner) *APIController {
-	nodes := runner.NewStore(pubsub)
+func NewAPIController(pubsub *store.Pubsub, apps store.Store, appRunner runner.AppRunner) *APIController {
+	nodes := store.NewStore(pubsub)
 	return &APIController{
 		AppController: NewAppController(apps, appRunner),
-		stores:        []runner.Store{nodes, apps},
+		stores:        []store.Store{nodes, apps},
 		pubsub:        pubsub,
 	}
 }
@@ -61,7 +62,7 @@ func (c *APIController) Watch(ctx echo.Context) error {
 	return err
 }
 
-func toEventObjectDTO(r runner.Resource) EventObject {
+func toEventObjectDTO(r store.Resource) EventObject {
 	switch o := r.(type) {
 	case *runner.App:
 		appDTO := toAppDTO(o)
