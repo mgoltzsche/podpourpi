@@ -69,8 +69,9 @@ func (a *AppList) SetItems(items []store.Resource) error {
 
 // +k8s:deepcopy-gen=true
 type AppStatus struct {
-	State      AppState
-	Containers []AppContainer
+	ActiveProfile string
+	State         AppState
+	Containers    []AppContainer
 }
 
 // +k8s:deepcopy-gen=true
@@ -78,4 +79,41 @@ type AppContainer struct {
 	ID    string
 	Name  string
 	State AppState
+}
+
+// +k8s:deepcopy-gen=true
+type Profile struct {
+	Name       string
+	App        string
+	Properties []Property
+}
+
+// +k8s:deepcopy-gen=true
+type Property struct {
+	Name  string
+	Value string
+}
+
+func (p *Profile) DeepCopyIntoResource(dest store.Resource) error {
+	out, ok := dest.(*Profile)
+	if !ok {
+		return fmt.Errorf("deep copy: unexpected target type %T provided, expected %T", dest, p)
+	}
+	p.DeepCopyInto(out)
+	return nil
+}
+
+// +k8s:deepcopy-gen=true
+type ProfileList struct {
+	Items []Profile
+}
+
+func (l *ProfileList) SetItems(items []store.Resource) error {
+	l.Items = make([]Profile, len(items))
+	for i, item := range items {
+		if err := item.DeepCopyIntoResource(&l.Items[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

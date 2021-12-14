@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/docker/docker/client"
 	"github.com/mgoltzsche/podpourpi/internal/store"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -21,41 +24,41 @@ const (
 var _ AppRunner = &DockerComposeRunner{}
 
 type DockerComposeRunner struct {
-	dir string
+	dir  string
+	apps store.Store
 }
 
-func NewDockerComposeRunner(dir string) *DockerComposeRunner {
-	return &DockerComposeRunner{dir: dir}
-}
-
-func (r *DockerComposeRunner) Apps() ([]App, error) {
-	files, err := os.ReadDir(r.dir)
+func NewDockerComposeRunner(ctx context.Context, dir string, dockerClient *client.Client, apps store.Store) (*DockerComposeRunner, error) {
+	composeApps, err := composeAppsFromDirectories(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read compose app root dir: %w", err)
+		return nil, err
 	}
-	apps := make([]App, 0, len(files))
-	for _, file := range files {
-		if file.IsDir() {
-			composeDir := filepath.Join(r.dir, file.Name())
-			_, f2 := os.Stat(filepath.Join(composeDir, "docker-compose.yaml"))
-			_, f1 := os.Stat(filepath.Join(composeDir, "docker-compose.yml"))
-			if f1 == nil || f2 == nil {
-				apps = append(apps, App{
-					Name: file.Name(),
-					Type: AppTypeDockerCompose,
-					Status: AppStatus{
-						State: AppStateDisabled,
-					},
-				})
-			}
-		}
+	for _, a := range composeApps {
+		app := a
+		apps.Set(a.Name, &app)
 	}
-	return apps, nil
+	containers := watchDockerContainers(ctx, dockerClient)
+	aggregateAppsFromComposeContainers(containers, apps)
+	return &DockerComposeRunner{dir: dir, apps: apps}, nil
 }
 
-func (r *DockerComposeRunner) Start(a *App) error {
+func (r *DockerComposeRunner) Start(a *App, profile string) error {
+	envFile, err := r.activateProfile(a, profile)
+	if err != nil {
+		return errors.Wrapf(err, "start app %s", a.Name)
+	}
+	if profile != "" {
+		r.apps.Modify(a.Name, a, func() (bool, error) {
+			a.Status.ActiveProfile = profile
+			return true, nil
+		})
+	}
+	cmd := []string{"up", "-d"}
+	if envFile != "" {
+		cmd = append(cmd, fmt.Sprintf("--env-file=%s", envFile))
+	}
 	dir := filepath.Join(r.dir, a.Name)
-	_, err := runCommand(dir, "docker-compose", "up", "-d")
+	_, err = runCommand(dir, "docker-compose", cmd...)
 	return errors.Wrapf(err, "%s: docker-compose up", dir)
 }
 
@@ -73,6 +76,79 @@ func (r *DockerComposeRunner) SupportedTypes() []string {
 	return []string{AppTypeDockerCompose}
 }
 
+func (r *DockerComposeRunner) activateProfile(a *App, profile string) (string, error) {
+	activeProfilePath := activeProfileLinkPath(r.dir)
+	if profile == "" {
+		if _, err := os.Stat(activeProfilePath); err != nil {
+			if os.IsNotExist(err) {
+				return "", nil
+			}
+			return "", err
+		}
+		return "", nil
+	}
+	profileFile := fmt.Sprintf("%s.env", profile)
+	profilePath := filepath.Join(r.dir, profileFile)
+	if _, err := os.Stat(profilePath); err != nil {
+		if os.IsNotExist(err) {
+			return "", errors.Errorf("profile %q does not exist for app %s", profile, a.Name)
+		}
+		return "", errors.Wrap(err, "activate profile")
+	}
+	err := os.Symlink(activeProfilePath, profileFile)
+	return activeProfilePath, errors.Wrap(err, "activate profile")
+}
+
+func (r *DockerComposeRunner) GetProfile(a *App, p *Profile) error {
+	if a.Name == "" {
+		return fmt.Errorf("no app name provided")
+	}
+	if p.Name == "" {
+		return fmt.Errorf("no profile name provided")
+	}
+	envFile := filepath.Join(r.dir, a.Name, "profiles", fmt.Sprintf("%s.env", p.Name))
+	b, err := ioutil.ReadFile(envFile)
+	if err != nil {
+		return fmt.Errorf("read app profile: %w", err)
+	}
+	for i, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 || kv[0] == "" {
+			return fmt.Errorf("unexpected entry within env file %s at line %d. expected KEY=VALUE entry", envFile, i)
+		}
+		p.Properties = append(p.Properties, Property{Name: kv[0], Value: kv[1]})
+	}
+	return nil
+}
+
+func (r *DockerComposeRunner) SetProfile(a *App, p *Profile) error {
+	if a.Name == "" {
+		return fmt.Errorf("no app name provided")
+	}
+	if p.Name == "" {
+		return fmt.Errorf("no profile name provided")
+	}
+	profilesDir := filepath.Join(r.dir, a.Name, "profiles")
+	envFile := filepath.Join(profilesDir, fmt.Sprintf("%s.env", p.Name))
+	envFileContents := ""
+	for _, p := range p.Properties {
+		envFileContents = fmt.Sprintf("%s%s=%s", envFileContents, p.Name, p.Value)
+	}
+	err := os.MkdirAll(profilesDir, 0750)
+	if err != nil {
+		return fmt.Errorf("write profile: %w", err)
+	}
+	err = ioutil.WriteFile(envFile, []byte(envFileContents), 0640)
+	if err != nil {
+		return fmt.Errorf("write profile env file: %w", err)
+	}
+	return nil
+}
+
 func runCommand(dir, cmd string, args ...string) (string, error) {
 	c := exec.Command(cmd, args...)
 	var stdout, stderr bytes.Buffer
@@ -86,7 +162,55 @@ func runCommand(dir, cmd string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo store.Store) {
+func activeProfileLinkPath(dir string) string {
+	return filepath.Join(dir, "env.active")
+}
+
+func composeAppsFromDirectories(dir string) ([]App, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read compose app root dir: %w", err)
+	}
+	apps := make([]App, 0, len(files))
+	for _, file := range files {
+		if file.IsDir() {
+			composeDir := filepath.Join(dir, file.Name())
+			_, f2 := os.Stat(filepath.Join(composeDir, "docker-compose.yaml"))
+			_, f1 := os.Stat(filepath.Join(composeDir, "docker-compose.yml"))
+			if f1 == nil || f2 == nil {
+				activeProfile, err := deriveActiveProfileName(composeDir)
+				if err != nil && !os.IsNotExist(err) {
+					return nil, errors.Wrapf(err, "detect active profile of app %s", file.Name())
+				}
+				apps = append(apps, App{
+					Name: file.Name(),
+					Type: AppTypeDockerCompose,
+					Status: AppStatus{
+						ActiveProfile: activeProfile,
+						State:         AppStateDisabled,
+					},
+				})
+			}
+		}
+	}
+	return apps, nil
+}
+
+func deriveActiveProfileName(profileDir string) (string, error) {
+	profileLink := activeProfileLinkPath(profileDir)
+	path, err := os.Readlink(profileLink)
+	if err != nil {
+		return "", err
+	}
+	path = filepath.Base(path)
+	envFileSuffix := ".env"
+	if !strings.HasSuffix(path, envFileSuffix) {
+		return "", errors.Errorf("active profile link %s points to file with unexpected name %q, expected *.env", profileLink, path)
+	}
+	return path[:len(path)-len(envFileSuffix)], nil
+}
+
+func aggregateAppsFromComposeContainers(ch <-chan ContainerEvent, store store.Store) {
 	go func() {
 		for evt := range ch {
 			appName, composeSvc := appNameFromContainer(evt.Container)
@@ -94,7 +218,8 @@ func AggregateAppsFromComposeContainers(ch <-chan ContainerEvent, repo store.Sto
 				continue
 			}
 			var app App
-			err := repo.Modify(appName, &app, func() (bool, error) {
+			err := store.Modify(appName, &app, func() (bool, error) {
+				app.Type = AppTypeDockerCompose
 				switch evt.Type {
 				case EventTypeContainerAdd:
 					app.Name = appName

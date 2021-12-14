@@ -33,17 +33,10 @@ func RunServer(ctx context.Context, opts Options) error {
 	}
 	pubsub := &store.Pubsub{}
 	apps := store.NewStore(pubsub)
-	composeRunner := runner.NewDockerComposeRunner(opts.ComposeAppRoot)
-	composeApps, err := composeRunner.Apps()
+	composeRunner, err := runner.NewDockerComposeRunner(ctx, opts.ComposeAppRoot, dockerClient, apps)
 	if err != nil {
 		return err
 	}
-	for _, a := range composeApps {
-		app := a
-		apps.Set(a.Name, &app)
-	}
-	containers := runner.WatchContainers(ctx, dockerClient)
-	runner.AggregateAppsFromComposeContainers(containers, apps)
 	controller := NewAPIController(pubsub, apps, composeRunner)
 
 	srv := &http.Server{

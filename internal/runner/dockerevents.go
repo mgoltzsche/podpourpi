@@ -30,7 +30,7 @@ type Container struct {
 	Status string
 }
 
-func WatchContainers(ctx context.Context, dockerClient *client.Client) <-chan ContainerEvent {
+func watchDockerContainers(ctx context.Context, dockerClient *client.Client) <-chan ContainerEvent {
 	ch := make(chan ContainerEvent)
 	msgCh, errCh := dockerClient.Events(ctx, types.EventsOptions{})
 

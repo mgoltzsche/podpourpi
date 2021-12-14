@@ -3,9 +3,28 @@
     <q-card>
       <q-card-section>
         name: {{app.metadata.name}}
-        <div class="q-gutter-sm">
-          <q-checkbox v-model="app.spec.enabled" label="Enabled" @click="updateApp()"/>
-        </div>
+        <q-btn-dropdown
+          split
+          class="glossy"
+          color="teal"
+          :label="toggleAppButtonLabel()"
+          @click="toggleAppState(undefined)"
+        >
+          <q-list>
+            <q-item clickable v-close-popup @click="toggleAppState(profile.name)" v-for="profile in profiles" :key="profile.name">
+              <q-item-section avatar>
+                <q-avatar icon="assignment" color="primary" text-color="white" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label line="1">{{ profile.name }}</q-item-label>
+                <q-item-label caption>nice profile</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-icon name="info" color="amber" />
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
         <q-list>
           <q-item v-for="c in app.status.containers" :key="c.name">
             <q-item-section avatar>
@@ -25,9 +44,16 @@
 </template>
 
 <script lang="ts">
-import { ApiError, App, AppsService, Container } from '@/client'
+import { ApiError, App, AppsService, AppState, Container } from '@/client'
 import { Options, Vue } from 'vue-class-component'
 import { stateColors } from './AppList.vue'
+
+class Profile {
+  name: string
+  constructor(name: string) {
+    this.name = name
+  }
+}
 
 @Options({
   props: {
@@ -36,16 +62,27 @@ import { stateColors } from './AppList.vue'
 })
 export default class AppSettings extends Vue {
   app!: App
-
-  updateApp(): void {
-    console.log(`app ${this.app.metadata.name} enabled: ${this.app.spec.enabled}`)
-    AppsService.updateApp(this.app.metadata.name, this.app).catch(e => {
+  profiles: Profile[] = [{name: 'p1'}, {name: 'p2'}]
+  toggleAppState(profile: string|undefined): void {
+    let toggleFn = (app: string) => {
+      return AppsService.startApp(app, profile)
+    }
+    if (!this.isAppStopped()) {
+      toggleFn = AppsService.stopApp
+    }
+    toggleFn(this.app.metadata.name).catch(e => {
       let msg = e instanceof ApiError ? `${e.toString()}: ${(e as ApiError).body?.message}` : e.toString()
       this.$q.notify({
         type: 'negative',
         message: msg,
       })
     })
+  }
+  isAppStopped(): boolean {
+    return this.app.status.state == AppState.UNKNOWN || this.app.status.state == AppState.EXITED
+  }
+  toggleAppButtonLabel(): string {
+    return (this.isAppStopped() ? 'start' : 'stop') + ` (${this.app.status.activeProfile})`
   }
   color(c: Container): string {
     return stateColors[c.status.state]

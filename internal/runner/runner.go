@@ -6,8 +6,10 @@ import (
 )
 
 type AppRunner interface {
-	Start(*App) error
+	Start(a *App, profile string) error
 	Stop(*App) error
 	Logs(context.Context, *App) io.ReadCloser
 	SupportedTypes() []string
+	GetProfile(*App, *Profile) error
+	SetProfile(*App, *Profile) error
 }

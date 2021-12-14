@@ -47,9 +47,9 @@ paths:
             "application/json":
               schema:
                 $ref: "#/components/schemas/AppList"
-  "/v1/apps/{name}":
+  "/v1/apps/{app}":
     parameters:
-    - name: name
+    - name: app
       description: App name
       in: path
       required: true
@@ -68,14 +68,8 @@ paths:
             "application/json":
               schema:
                 $ref: "#/components/schemas/App"
-        "400":
-          description: Bad request
-          content:
-            "application/json":
-              schema:
-                $ref: "#/components/schemas/Error"
         "404":
-          description: Environment not found
+          description: App not found
           content:
             "application/json":
               schema:
@@ -118,6 +112,161 @@ paths:
             "application/json":
               schema:
                 $ref: "#/components/schemas/Error"
+  "/v1/apps/{app}/start":
+    parameters:
+    - name: app
+      description: App name
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: profile
+      description: Name of an app profile
+      in: query
+      required: false
+      schema:
+        type: string
+    get:
+      summary: Start an app
+      description: Start an app
+      operationId: startApp
+      tags:
+      - apps
+      responses:
+        "200":
+          description: |
+            The app was started and may initialize asynchronously.
+            Further status information is emitted on the events endpoint.
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/App"
+        "404":
+          description: App not found
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal Server Error
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+  "/v1/apps/{app}/stop":
+    parameters:
+    - name: app
+      description: App name
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      summary: Stop an app
+      description: Stop an app
+      operationId: stopApp
+      tags:
+      - apps
+      responses:
+        "200":
+          description: |
+            The app was started and may initialize asynchronously.
+            Further status information is emitted on the events endpoint.
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/App"
+        "404":
+          description: App not found
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal Server Error
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+  "/v1/apps/{app}/profile":
+    parameters:
+    - name: app
+      description: App name
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      summary: Create app profile
+      description: Create app profile
+      operationId: createAppProfile
+      tags:
+      - apps
+      responses:
+        "201":
+          description: Created the provided profile on the server
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/AppProfile"
+        "409":
+          description: The provided profile name exists already on the server
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+  "/v1/apps/{app}/profile/{profile}":
+    parameters:
+    - name: app
+      description: App name
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: profile
+      description: App profile name
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      summary: Get app profile
+      description: Get app profile
+      operationId: getAppProfile
+      tags:
+      - apps
+      responses:
+        "200":
+          description: Returns the requested app profile
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/AppProfile"
+        "404":
+          description: App profile not found
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      summary: Update app profile
+      description: Update app profile
+      operationId: updateAppProfile
+      tags:
+      - apps
+      responses:
+        "200":
+          description: Updates the app profile
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/AppProfile"
+        "404":
+          description: App profile not found
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/Error"
 
 components:
   schemas:
@@ -154,17 +303,11 @@ components:
       - status
     AppSpec:
       type: object
-      properties:
-        enabled:
-          type: boolean
-        activeProfile:
-          type: string
-      required:
-      - enabled
-      - activeProfile
     AppStatus:
       type: object
       properties:
+        activeProfile:
+          type: string
         node:
           type: string
         state:
@@ -174,8 +317,10 @@ components:
           items:
             $ref: "#/components/schemas/Container"
       required:
+      - activeProfile
       - state
       - containers
+      - profiles
     Container:
       type: object
       properties:
@@ -206,6 +351,39 @@ components:
       - running
       - error
       - exited
+    AppProfile:
+      type: object
+      properties:
+        name:
+          type: string
+        app:
+          type: string
+        properties:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppProperty"
+      required:
+      - name
+      - app
+      - properties
+    AppProperty:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/AppPropertyType"
+        value:
+          type: string
+      required:
+      - name
+      - type
+    AppPropertyType:
+      type: string
+      enum:
+      - string
+      - password
+      - service
     Error:
       type: object
       properties:
@@ -247,3 +425,5 @@ components:
       properties:
         app:
           $ref: "#/components/schemas/App"
+        profile:
+          $ref: "#/components/schemas/AppProfile"

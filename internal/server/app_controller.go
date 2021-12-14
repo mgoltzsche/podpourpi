@@ -1,13 +1,13 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/mgoltzsche/podpourpi/internal/store"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -52,38 +52,143 @@ func (c *AppController) GetApp(ctx echo.Context, name string) error {
 
 // UpdateApp updates an app.
 func (c *AppController) UpdateApp(ctx echo.Context, name string) error {
+	panic("app update not supported - if anything, it would need to configure the autoStart for the app")
+}
+
+// StartApp starts an app.
+func (c *AppController) StartApp(ctx echo.Context, name string, params StartAppParams) error {
 	w := ctx.Response()
-	var dto App
+	var app runner.App
+	err := c.apps.Get(name, &app)
+	if err != nil {
+		return notFound(w, err.Error())
+	}
+	profile := ""
+	if params.Profile != nil {
+		profile = *params.Profile
+	}
+	err = c.runner.Start(&app, profile)
+	if err != nil {
+		_ = writeJSONResponse(w, http.StatusInternalServerError, Error{
+			Type:    "AppStartFailed",
+			Message: fmt.Sprintf("Failed to start app %s (see server log for details)", app.Name),
+		})
+		return errors.Wrap(err, "start/update app")
+	}
+	return writeJSONResponse(w, http.StatusOK, toAppDTO(&app))
+}
+
+// StopApp starts an app.
+func (c *AppController) StopApp(ctx echo.Context, name string) error {
+	w := ctx.Response()
+	var app runner.App
+	err := c.apps.Get(name, &app)
+	if err != nil {
+		return notFound(w, err.Error())
+	}
+	err = c.runner.Stop(&app)
+	if err != nil {
+		_ = writeJSONResponse(w, http.StatusInternalServerError, Error{
+			Type:    "AppStartFailed",
+			Message: fmt.Sprintf("Failed to start app %s (see server log for details)", app.Name),
+		})
+		return errors.Wrap(err, "stop app")
+	}
+	return writeJSONResponse(w, http.StatusOK, toAppDTO(&app))
+}
+
+// GetAppProfile get an app profile
+func (c *AppController) GetAppProfile(ctx echo.Context, appName, profileName string) error {
+	w := ctx.Response()
+	var app runner.App
+	err := c.apps.Get(appName, &app)
+	if err != nil {
+		return notFound(w, err.Error())
+	}
+	profile := runner.Profile{Name: profileName}
+	err = c.runner.GetProfile(&app, &profile)
+	if err != nil {
+		return internalServerError(w, err)
+	}
+	return writeJSONResponse(w, http.StatusOK, profileToDTO(&profile))
+}
+
+func profileToDTO(profile *runner.Profile) (dto AppProfile) {
+	dto.Name = profile.Name
+	dto.App = profile.App
+	dto.Properties = make([]AppProperty, len(profile.Properties))
+	for i, p := range profile.Properties {
+		value := p.Value
+		dto.Properties[i] = AppProperty{Name: p.Name, Value: &value, Type: AppPropertyTypeString}
+	}
+	return
+}
+
+// CreateAppProfile creates a new app profile
+func (c *AppController) CreateAppProfile(ctx echo.Context, appName string) error {
+	w := ctx.Response()
+	err := c.writeAppProfile(ctx, appName)
+	if err != nil {
+		return err
+	}
+	// TODO: don't return password properties contained within profile
+	return writeJSONResponse(w, http.StatusCreated, AppProfile{})
+}
+
+// UpdateAppProfile update an app profile
+func (c *AppController) UpdateAppProfile(ctx echo.Context, appName, _ string) error {
+	w := ctx.Response()
+	err := c.writeAppProfile(ctx, appName)
+	if err != nil {
+		return err
+	}
+	// TODO: don't return password properties contained within profile
+	return writeJSONResponse(w, http.StatusOK, AppProfile{})
+}
+
+func (c *AppController) writeAppProfile(ctx echo.Context, appName string) error {
+	w := ctx.Response()
+	var dto AppProfile
 	err := ctx.Bind(&dto)
 	if err != nil {
 		return badRequest(w, err.Error())
 	}
 	var app runner.App
-	err = c.apps.Get(name, &app)
+	err = c.apps.Get(appName, &app)
 	if err != nil {
 		return notFound(w, err.Error())
 	}
-	app.Enabled = dto.Spec.Enabled
-	// TODO: ideally support optimistic locking here to detect if the app is accidentally overwritten
-	c.apps.Set(name, &app)
-	// TODO: move start/stop logic into separate endpoint
-	// TODO: set/apply profile
-	action, err := c.applyApp(ctx.Request().Context(), &app)
+	profile, err := profileFromDTO(&dto)
+	if err != nil {
+		return badRequest(w, err.Error())
+	}
+	err = c.runner.SetProfile(&app, profile)
 	if err != nil {
 		_ = writeJSONResponse(w, http.StatusInternalServerError, Error{
-			Type:    "AppActionFailed",
-			Message: fmt.Sprintf("Failed to %s %s (see server log for details)", action, app.Name),
+			Type:    "AppProfileWriteFailed",
+			Message: fmt.Sprintf("Failed to write profile %s for app %s (see server log for details)", dto.Name, app.Name),
 		})
-		return err
+		return errors.Wrapf(err, "write profile %s for app %s", dto.Name, app.Name)
 	}
-	return writeJSONResponse(w, http.StatusAccepted, toAppDTO(&app))
+	return nil
 }
 
-func (c *AppController) applyApp(ctx context.Context, a *runner.App) (string, error) {
-	if a.Enabled {
-		return "start/update", c.runner.Start(a)
+func profileFromDTO(dto *AppProfile) (*runner.Profile, error) {
+	profile := runner.Profile{
+		Name:       dto.Name,
+		App:        dto.App,
+		Properties: make([]runner.Property, len(dto.Properties)),
 	}
-	return "stop", c.runner.Stop(a)
+	for i, p := range dto.Properties {
+		if p.Name == "" {
+			return nil, fmt.Errorf("empty property name provided")
+		}
+		if p.Value == nil {
+			return nil, fmt.Errorf("no value specified for property %s", p.Name)
+		}
+		profile.Properties[i] = runner.Property{Name: p.Name, Value: *p.Value}
+	}
+	return &profile, nil
 }
 
 func toAppDTO(a *runner.App) App {
@@ -99,13 +204,10 @@ func toAppDTO(a *runner.App) App {
 	}
 	return App{
 		Metadata: Metadata{Name: a.Name},
-		Spec: AppSpec{
-			Enabled:       a.Enabled,
-			ActiveProfile: "default",
-		},
 		Status: AppStatus{
-			State:      toAppState(a.Status.State),
-			Containers: containers,
+			ActiveProfile: a.Status.ActiveProfile,
+			State:         toAppState(a.Status.State),
+			Containers:    containers,
 		},
 	}
 }

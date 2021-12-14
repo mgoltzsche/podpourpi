@@ -66,9 +66,10 @@ func toEventObjectDTO(r store.Resource) EventObject {
 	switch o := r.(type) {
 	case *runner.App:
 		appDTO := toAppDTO(o)
-		return EventObject{
-			App: &appDTO,
-		}
+		return EventObject{App: &appDTO}
+	case *runner.Profile:
+		profileDTO := profileToDTO(o)
+		return EventObject{Profile: &profileDTO}
 	default:
 		return EventObject{}
 	}
