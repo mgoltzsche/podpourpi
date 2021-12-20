@@ -12,6 +12,9 @@ PRISM_MOCK_SERVER_VERSION = 4.5.0
 PRISM_MOCK_SERVER_NPM = $(TOOLS_DIR)/prism-cli-$(PRISM_MOCK_SERVER_VERSION)
 PRISM_MOCK_SERVER = $(PRISM_MOCK_SERVER_NPM)/node_modules/@stoplight/prism-cli/dist/index.js
 
+CONTROLLER_GEN = $(TOOLS_DIR)/controller-gen
+CONTROLLER_GEN_VERSION = v0.4.1
+
 OPENAPI_FILE=./api/openapi.yaml
 
 all: build
@@ -42,8 +45,9 @@ ui/node_modules:
 clean:
 	rm -rf "$(CURDIR)/build"
 
-generate: $(OAPI_CODEGEN) $(DEEPCOPY_GEN)
-	PATH="$(TOOLS_DIR):$$PATH" go generate ./...
+generate: $(CONTROLLER_GEN) $(OAPI_CODEGEN) $(DEEPCOPY_GEN)
+	#PATH="$(TOOLS_DIR):$$PATH" go generate ./...
+	$(CONTROLLER_GEN) object paths="./..."
 
 validate-openapi: ui/node_modules
 	@echo Validating the OpenAPI spec at $(OPENAPI_FILE)
@@ -54,6 +58,9 @@ $(OAPI_CODEGEN): ## Installs oapi-codegen
 
 $(DEEPCOPY_GEN):
 	$(call go-get-tool,$(DEEPCOPY_GEN),k8s.io/gengo/examples/deepcopy-gen@$(DEEPCOPY_GEN_VERSION))
+
+$(CONTROLLER_GEN):
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION))
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 define go-get-tool
@@ -67,4 +74,3 @@ GOBIN=$(TOOLS_DIR) go get $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
-
