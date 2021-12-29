@@ -6,9 +6,11 @@
 </template>
 
 <script lang="ts">
-import { Options, Vue } from 'vue-class-component';
-import AppSettings from '@/components/AppSettings.vue';
-import { App } from '@/client';
+import { Options, Vue } from 'vue-class-component'
+import AppSettings from '@/components/AppSettings.vue'
+import {
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_App as App,
+} from '@/client'
 
 @Options({
   components: {

@@ -26,7 +26,7 @@
           </q-list>
         </q-btn-dropdown>
         <q-list>
-          <q-item v-for="c in app.status.containers" :key="c.name">
+          <q-item v-for="c in app.status.containers || []" :key="c.name">
             <q-item-section avatar>
               <q-avatar :color="color(c)" text-color="white">
               </q-avatar>
@@ -44,9 +44,13 @@
 </template>
 
 <script lang="ts">
-import { ApiError, App, AppsService, AppState, Container } from '@/client'
 import { Options, Vue } from 'vue-class-component'
 import { stateColors } from './AppList.vue'
+import {
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_App as App,
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_Container as Container,
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_ContainerStatus as AppState,
+} from '@/client'
 
 class Profile {
   name: string
@@ -64,7 +68,8 @@ export default class AppSettings extends Vue {
   app!: App
   profiles: Profile[] = [{name: 'p1'}, {name: 'p2'}]
   toggleAppState(profile: string|undefined): void {
-    let toggleFn = (app: string) => {
+    // TODO: implement App update
+    /*let toggleFn = (app: string) => {
       return AppsService.startApp(app, profile)
     }
     if (!this.isAppStopped()) {
@@ -76,10 +81,10 @@ export default class AppSettings extends Vue {
         type: 'negative',
         message: msg,
       })
-    })
+    })*/
   }
   isAppStopped(): boolean {
-    return this.app.status.state == AppState.UNKNOWN || this.app.status.state == AppState.EXITED
+    return this.app.status.state == AppState.state.UNKNOWN || this.app.status.state == AppState.state.EXITED
   }
   toggleAppButtonLabel(): string {
     return (this.isAppStopped() ? 'start' : 'stop') + ` (${this.app.status.activeProfile})`

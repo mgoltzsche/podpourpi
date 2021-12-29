@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { store, key } from './store'
-import { watchServerChanges } from './store/sync'
+import { ActionTypes } from './store/actions'
 import { Quasar } from 'quasar'
 import quasarUserOptions from './quasar-user-options'
 
@@ -12,4 +12,4 @@ createApp(App)
   .use(Quasar, quasarUserOptions)
   .mount('#app')
 
-watchServerChanges()
+store.dispatch(ActionTypes.WATCH_APPS)

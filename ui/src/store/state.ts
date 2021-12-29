@@ -1,4 +1,6 @@
-import { App } from '../client/models/App'
+import {
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_App as App,
+} from '@/client'
 
 export const state: State = {
   apps: [],

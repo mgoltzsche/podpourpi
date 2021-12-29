@@ -1,54 +1,59 @@
 import { MutationTree } from 'vuex'
 import { State } from './state'
-import { Event as ServerEvent, Metadata } from '@/client'
-import { EventAction } from '@/client/models/EventAction'
+import { WatchEvent, EventType } from '@/k8sclient/watch'
+import {
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_App as App,
+  io_k8s_apimachinery_pkg_apis_meta_v1_ObjectMeta as ObjectMeta,
+} from '@/client'
 
 export enum MutationTypes {
-    SYNC_DATA = 'SYNC_DATA',
+    SYNC_APPS = 'SYNC_APPS',
 }
 
 export type Mutations<S = State> = {
-  [MutationTypes.SYNC_DATA](state: S, events: ServerEvent[]): void
+  [MutationTypes.SYNC_APPS](state: S, events: WatchEvent<App>[]): void
 }
 
 export const mutations: MutationTree<State> & Mutations = {
-  [MutationTypes.SYNC_DATA](state: State, events: ServerEvent[]) {
-    if (events.length > 1) {
-      // Reset state on reconnect.
-      // (The server emits all data with the first event. Subsequently one event is emitted per message / at a time.)
-      state.apps.length = 0
-    }
+  [MutationTypes.SYNC_APPS](state: State, events: WatchEvent<App>[]) {
     events.forEach(evt => {
-      if (evt.object.app) {
-        state.apps = applyChange('app', state.apps, evt.action, evt.object.app)
-      }
+      state.apps = applyChange('app', state.apps, evt.type, evt.object)
     })
   },
 }
 
-function applyChange<T extends Resource>(typeName: string, items: Array<T>, action: EventAction, o: T) {
+function applyChange<T extends Resource>(typeName: string, items: Array<T>, evtType: EventType, o: T) {
   if (o.metadata.name == '') {
     o.metadata.name = '<unknown>'
   }
-  // TODO: don't replace items - otherwise UI looses track
-  console.log('mutate:', action, typeName, o)
-  switch(action) {
-    case EventAction.CREATE:
-      items.push(o)
-      break
-    case EventAction.UPDATE:
+  console.log('mutate:', evtType, typeName, o)
+  switch(evtType) {
+    case EventType.ADDED, EventType.MODIFIED, EventType.BOOKMARK:
       items = items.filter(a => a.metadata.name != o.metadata.name)
       items.push(o)
       break
-    case EventAction.DELETE:
+    case EventType.DELETED:
       items = items.filter(a => a.metadata.name != o.metadata.name)
       break
     default:
-      console.log('ERROR: unexpected server event action received:', action)
+      console.log(`ERROR: received unexpected watch event type: ${evtType}`)
   }
+  items.sort(compareResourcesByName)
   return items
 }
 
+function compareResourcesByName(a: Resource, b: Resource): number {
+  const aName = a.metadata.name || ''
+  const bName = b.metadata.name || ''
+  if (aName < bName) {
+    return -1
+  }
+  if (aName > bName) {
+    return 1
+  }
+  return 0
+}
+
 interface Resource {
-    readonly metadata: Metadata
+    readonly metadata: ObjectMeta
 }

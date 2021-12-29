@@ -20,11 +20,13 @@
 </template>
 
 <script lang="ts">
-import { App } from '@/client';
 import { Vue } from 'vue-class-component'
-import { AppState } from '@/client';
+import {
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_App as App,
+  com_github_mgoltzsche_podpourpi_pkg_apis_app_v1alpha1_ContainerStatus as AppState,
+} from '@/client';
 
-export const stateColors: {[key in AppState]: string} = {
+export const stateColors: {[key in AppState.state]: string} = {
   running: 'positive',
   error: 'negative',
   starting: 'info',
@@ -34,7 +36,7 @@ export const stateColors: {[key in AppState]: string} = {
 
 export default class AppList extends Vue {
   color(a: App): string {
-    return stateColors[a.status.state]
+    return stateColors[a.status.state||AppState.state.UNKNOWN]
   }
 }
 </script>
