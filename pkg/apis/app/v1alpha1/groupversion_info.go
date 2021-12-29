@@ -5,6 +5,8 @@
 //go:generate conversion-gen -O zz_generated.conversion -i . -h ../../../../boilerplate.go.txt
 
 // +k8s:openapi-gen=true
+// +genclient
+// +genclient:nonNamespaced
 // +k8s:deepcopy-gen=package,register
 // +k8s:conversion-gen=github.com/mgoltzsche/podpourpi/pkg/apis/apps
 // +k8s:defaulter-gen=TypeMeta

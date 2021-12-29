@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic"
 	registryrest "k8s.io/apiserver/pkg/registry/rest"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
@@ -29,6 +30,7 @@ func (b *Builder) WithResource(obj resource.Object, storageProvider StorageProvi
 	if s, found := b.storageProvider[gvr.GroupResource()]; found {
 		return b.forGroupVersionResource(gvr, s.Get)
 	}
+	utilruntime.Must(b.scheme.SetVersionPriority(gvr.GroupVersion()))
 
 	// TODO: fix build (compatibility) error or avoid
 	// If the type implements it's own storage, then use that

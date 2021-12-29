@@ -4,3 +4,5 @@
 *.png
 node_modules
 ui/src/client
+pkg/generated
+kubeconfig.yaml

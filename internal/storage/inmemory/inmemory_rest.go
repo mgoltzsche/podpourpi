@@ -1,6 +1,6 @@
 package inmemory
 
-import (
+/*import (
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/mgoltzsche/podpourpi/internal/storage"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,9 +26,6 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	//builderrest "sigs.k8s.io/apiserver-runtime/pkg/builder/rest"
 )
-
-// ErrResourceNotExists means the file doesn't actually exist.
-var ErrResourceNotExists = fmt.Errorf("resource doesn't exist")
 
 // ErrNamespaceNotExists means the directory for the namespace doesn't actually exist.
 var ErrNamespaceNotExists = errors.New("namespace does not exist")
@@ -73,10 +71,16 @@ func NewInMemoryREST(
 ) rest.Storage {
 	objectMap := make(map[string]runtime.Object, 5)
 	for _, o := range objects {
+		m, err := meta.Accessor(o)
+		if err != nil {
+			panic(err)
+		}
+		m.SetCreationTimestamp(metav1.Now())
 		objectMap[objectKey(o)] = o
 	}
 	rest := &inmemoryREST{
 		TableConvertor: rest.NewDefaultTableConvertor(groupResource),
+		groupResource:  groupResource,
 		codec:          codec,
 		isNamespaced:   isNamespaced,
 		newFunc:        newFunc,
@@ -89,8 +93,9 @@ func NewInMemoryREST(
 
 type inmemoryREST struct {
 	rest.TableConvertor
-	codec        runtime.Codec
-	isNamespaced bool
+	groupResource schema.GroupResource
+	codec         runtime.Codec
+	isNamespaced  bool
 
 	objects map[string]runtime.Object
 	lock    sync.RWMutex
@@ -125,13 +130,14 @@ func (f *inmemoryREST) NamespaceScoped() bool {
 func (f *inmemoryREST) Get(
 	ctx context.Context,
 	name string,
-	options *metav1.GetOptions,
+	opts *metav1.GetOptions,
 ) (runtime.Object, error) {
+	fmt.Println("## rest:Get")
 	f.lock.RLock()
 	defer f.lock.RUnlock()
 	obj := f.objects[name]
 	if obj == nil {
-		return nil, ErrResourceNotExists
+		return nil, kerrors.NewNotFound(f.groupResource, name)
 	}
 	return obj, nil
 }
@@ -183,6 +189,12 @@ func (f *inmemoryREST) Create(
 		}
 	}
 
+	m, err := meta.Accessor(obj)
+	if err != nil {
+		return nil, err
+	}
+	m.SetCreationTimestamp(metav1.Now())
+	m.SetResourceVersion("0")
 	f.objects[objectKey(obj)] = obj
 	f.notifyWatchers(watch.Event{
 		Type:   watch.Added,
@@ -301,8 +313,11 @@ func (f *inmemoryREST) DeleteCollection(
 }
 
 func objectKey(o runtime.Object) string {
-	obj := o.(metav1.Object)
-	return obj.GetName()
+	m, err := meta.Accessor(o)
+	if err != nil {
+		panic(err)
+	}
+	return m.GetName()
 }
 
 func appendItem(v reflect.Value, obj runtime.Object) {
@@ -345,7 +360,7 @@ func (f *inmemoryREST) Watch(ctx context.Context, options *metainternalversion.L
 		}
 	}
 
-	if lastItem != nil {
+	if lastItem != nil && options.AllowWatchBookmarks {
 		// Indicate to the client that synchronization completed
 		jw.ch <- watch.Event{
 			Type:   watch.Bookmark,
@@ -375,7 +390,4 @@ func (w *jsonWatch) Stop() {
 func (w *jsonWatch) ResultChan() <-chan watch.Event {
 	return w.ch
 }
-
-func (f *inmemoryREST) ConvertToTable(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error) {
-	return &metav1.Table{}, nil
-}
+*/
