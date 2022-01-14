@@ -53,7 +53,7 @@ generate: $(CONTROLLER_GEN) $(OAPI_CODEGEN) $(DEEPCOPY_GEN) $(KUBE_OPENAPI_GEN)
 	#$(CONTROLLER_GEN) crd paths=./pkg/apis/... output:dir=./crd
 	$(CONTROLLER_GEN) object paths=./pkg/apis/...
 	$(KUBE_OPENAPI_GEN) --output-base=./pkg/generated --output-package=openapi -O zz_generated.openapi -h ./boilerplate/boilerplate.go.txt \
-		--input-dirs=github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1,k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1,k8s.io/apimachinery/pkg/apis/meta/v1,k8s.io/apimachinery/pkg/runtime,k8s.io/apimachinery/pkg/version
+		--input-dirs=github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1,k8s.io/api/core/v1,k8s.io/kube-aggregator/pkg/apis/apiregistration/v1,k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1,k8s.io/apimachinery/pkg/apis/meta/v1,k8s.io/apimachinery/pkg/runtime,k8s.io/apimachinery/pkg/version,k8s.io/apimachinery/pkg/util/intstr
 
 generate-openapi: generate build
 	@echo Load OpenAPI spec from freshly built server binary

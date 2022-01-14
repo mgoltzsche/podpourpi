@@ -10,26 +10,29 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	//extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
+	"k8s.io/apiserver/pkg/storage/etcd3"
 )
 
 type ItemsIterator func(l runtime.Object, each func(runtime.Object) error) error
 
 type inMemoryStore struct {
-	objects       map[string]runtime.Object
-	listObject    runtime.Object
-	itemsIterator ItemsIterator
-	lock          sync.RWMutex
-	watcherMutex  sync.RWMutex
-	watchers      map[int]*watcher
+	objects         map[string]runtime.Object
+	listObject      runtime.Object
+	itemsIterator   ItemsIterator
+	lock            sync.RWMutex
+	watcherMutex    sync.RWMutex
+	watchers        map[int]*watcher
+	versioner       etcd3.APIObjectVersioner
+	resourceVersion uint64
 }
 
 func NewInMemoryStore(listObject runtime.Object, itemsFn ItemsIterator) storage.Interface {
@@ -60,13 +63,17 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 		return err
 	}
 	m.SetCreationTimestamp(metav1.Now())
-	m.SetResourceVersion("0")
-	s.objects[k] = obj.DeepCopyObject()
+	m.SetResourceVersion("1") // Setting this to a value >0 fixed the not found error
+	fmt.Printf("## add %s\n", k)
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
 		return fmt.Errorf("create %T: tounstructured: %w", obj, err)
 	}
-	runtime.DefaultUnstructuredConverter.FromUnstructured(u, out)
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(u, out)
+	if err != nil {
+		return fmt.Errorf("create %T: fromunstructured: %w", obj, err)
+	}
+	s.objects[k] = obj.DeepCopyObject()
 	s.notifyWatchers(watch.Event{
 		Type:   watch.Added,
 		Object: out,
@@ -82,10 +89,10 @@ func objectKey(key string, o runtime.Object) (k, name string, err error) {
 	gr := groupResource(o)
 	// TODO: derive the object key properly
 	if gr.Resource == "customresourcedefinitions" {
-		return fmt.Sprintf("%s/%s", key, gr.Group), gr.Group, nil
+		return strings.TrimLeft(key, "/"), gr.Group, nil
 	}
 	name = meta.GetName()
-	return fmt.Sprintf("%s/%s%s/%s", key, gr.Group, gr.Resource, name), name, nil
+	return fmt.Sprintf("%s/%s", key, name), name, nil
 }
 
 func groupResource(obj runtime.Object) schema.GroupResource {
@@ -118,8 +125,10 @@ func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOpt
 	if err != nil {
 		return fmt.Errorf("get %s: %w", k, err)
 	}
+	fmt.Printf("## get %s\n", k)
 	found := s.objects[k]
 	if found == nil {
+		fmt.Printf("##   -> not found\n")
 		if opts.IgnoreNotFound {
 			return nil
 		}
@@ -129,45 +138,68 @@ func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOpt
 	if err != nil {
 		return fmt.Errorf("get %T: tounstructured: %w", obj, err)
 	}
-	runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj)
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj)
+	if err != nil {
+		return err
+	}
+	//fmt.Printf("##   -> %+v\n", obj)
 	return nil
 }
 
 func (s *inMemoryStore) GetToList(ctx context.Context, key string, opts storage.ListOptions, obj runtime.Object) error {
+	fmt.Println("## gettolist")
 	return s.List(ctx, key, opts, obj)
 }
 
 func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj runtime.Object, ignoreNotFound bool, preconditions *storage.Preconditions, modify storage.UpdateFunc, cachedExistingObject runtime.Object) error {
+	// TODO: check caller code to find reason for crd not being found after it was created.
+	// See:
+	//  k8s.io/apiserver/pkg/registry/generic/registry.(*DryRunnableStorage).GuaranteedUpdate(0x8, {0x250cd78, 0xc001574630}, {0xc001a41a40, 0x4}, {0x24ef600, 0xc0009e8580}, 0x0, 0x203000, 0xc0009abef0, ...)
+	//  /home/max/go/pkg/mod/k8s.io/apiserver@v0.23.1/pkg/registry/generic/registry/dryrun.go:101
+	//  k8s.io/apiserver/pkg/registry/generic/registry.(*Store).Update(0xc0000c57c0, {0x250cd78, 0xc001574630}, {0xc00063c03c, 0xc000c95c38}, {0x24f0668, 0xc0003fa870}, 0xc000a08320, 0x22ca928, 0x0, ...)
+	// 	/home/max/go/pkg/mod/k8s.io/apiserver@v0.23.1/pkg/registry/generic/registry/store.go:517 +0x508
+	//  k8s.io/apiextensions-apiserver/pkg/registry/customresourcedefinition.(*StatusREST).Update(0x255f5a8, {0x250cd78, 0xc001574630}, {0xc00063c03c, 0x0}, {0x24f0668, 0xc0003fa870}, 0x0, 0x4, 0x0, ...)
+	//  /home/max/go/pkg/mod/k8s.io/apiextensions-apiserver@v0.23.1/pkg/registry/customresourcedefinition/etcd.go:207
+	//panic("### " + key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	k, name, err := objectKey(key, obj)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", k, err)
 	}
+	fmt.Printf("## mod %s\n", k)
 	found := s.objects[k]
 	if found == nil {
+		fmt.Printf("##   -> not found (ignore: %v)\n", ignoreNotFound)
 		if ignoreNotFound {
 			return nil
 		}
 		return errors.NewNotFound(groupResource(obj), name)
 	}
 	found = found.DeepCopyObject()
+	resVer, err := s.versioner.ObjectResourceVersion(found)
+	if err != nil {
+		return err
+	}
 	// TODO: run preconditions and validator
 	out, ttl, err := modify(found, storage.ResponseMeta{
-		// TODO: set resourceVersion
+		ResourceVersion: resVer,
 	})
 	if err != nil {
-		return fmt.Errorf("update %s: modifier: %w", k, err)
+		fmt.Printf("#########################%T %s\n", err, err) // CRD not found
+		return err
 	}
 	if ttl != nil && *ttl > 0 {
 		return fmt.Errorf("update: ttl > 0 is not supported, modifier returned ttl: %d", ttl)
 	}
-	s.objects[k] = out.DeepCopyObject()
+	s.resourceVersion++
+	s.versioner.UpdateObject(out, s.resourceVersion)
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(out)
 	if err != nil {
 		return fmt.Errorf("update %T: tounstructured: %w", out, err)
 	}
 	runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj)
+	s.objects[k] = out.DeepCopyObject()
 	s.notifyWatchers(watch.Event{
 		Type:   watch.Added,
 		Object: out,
@@ -182,6 +214,7 @@ func (s *inMemoryStore) List(ctx context.Context, key string, opts storage.ListO
 	}
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+	fmt.Println("## list", key)
 	keys := make([]string, 0, len(s.objects))
 	for k := range s.objects {
 		keys = append(keys, k)
@@ -194,10 +227,22 @@ func (s *inMemoryStore) List(ctx context.Context, key string, opts storage.ListO
 }
 
 func (s *inMemoryStore) Watch(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
-	return s.WatchList(ctx, key, opts)
+	//return s.WatchList(ctx, key, opts)
+	fmt.Printf("## watch %s\n", key)
+	w := &watcher{
+		id:    len(s.watchers),
+		store: s,
+		ch:    make(chan watch.Event, 10),
+	}
+	s.watcherMutex.Lock()
+	s.watchers[w.id] = w
+	s.watcherMutex.Unlock()
+	return w, nil
 }
 
 func (s *inMemoryStore) WatchList(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
+	fmt.Println("## watchlist")
+	// TODO: verify difference between Watch() and WatchList() and/or unify both impls
 	w := &watcher{
 		id:    len(s.watchers),
 		store: s,
@@ -232,14 +277,16 @@ func (s *inMemoryStore) WatchList(ctx context.Context, key string, opts storage.
 }
 
 func (s *inMemoryStore) Versioner() storage.Versioner {
-	// TODO: impl
-	panic("TODO: Versioner()")
+	return &s.versioner
 }
 
 func (s *inMemoryStore) notifyWatchers(evt watch.Event) {
 	s.watcherMutex.RLock()
 	defer s.watcherMutex.RUnlock()
 	for _, w := range s.watchers {
+		m, _ := meta.Accessor(evt.Object)
+		t, _ := meta.TypeAccessor(evt.Object)
+		fmt.Printf("## notify %s %s.%s %s %T\n", evt.Type, t.GetKind(), t.GetAPIVersion(), m.GetName(), evt.Object)
 		w.ch <- evt
 	}
 }

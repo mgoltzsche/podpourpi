@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
@@ -108,11 +109,16 @@ func (f *storageAdapterREST) Get(
 	options *metav1.GetOptions,
 ) (runtime.Object, error) {
 	obj := f.newFunc()
+	m, err := meta.Accessor(obj)
+	if err != nil {
+		return nil, fmt.Errorf("get: %w", err)
+	}
+	m.SetName(name)
 	opts := storage.GetOptions{
 		// TODO: set ignoreNotFound?!
 		ResourceVersion: options.ResourceVersion,
 	}
-	err := f.store.Get(ctx, f.key, opts, obj)
+	err = f.store.Get(ctx, f.key, opts, obj)
 	return obj, err
 }
 
@@ -249,6 +255,6 @@ func (f *storageAdapterREST) DeleteCollection(
 func (f *storageAdapterREST) Watch(ctx context.Context, options *metainternalversion.ListOptions) (watch.Interface, error) {
 	return f.store.Watch(ctx, f.key, storage.ListOptions{
 		ResourceVersion: options.ResourceVersion,
-		// TODO: set preficate
+		// TODO: set predicate
 	})
 }

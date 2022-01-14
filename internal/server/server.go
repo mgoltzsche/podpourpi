@@ -1,7 +1,7 @@
 package server
 
 import (
-	"context"
+	/*"context"
 	"net"
 	"net/http"
 	"time"
@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
-	"github.com/mgoltzsche/podpourpi/internal/store"
+	"github.com/mgoltzsche/podpourpi/internal/store"*/
 	"github.com/sirupsen/logrus"
 )
 
@@ -22,7 +22,7 @@ type Options struct {
 	Logger         *logrus.Entry
 }
 
-func RunServer(ctx context.Context, opts Options) error {
+/*func RunServer(ctx context.Context, opts Options) error {
 	dockerClient, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -84,4 +84,4 @@ func healthCheckRequestHandler() echo.HandlerFunc {
 		_, err := w.Write([]byte("ok"))
 		return err
 	}
-}
+}*/

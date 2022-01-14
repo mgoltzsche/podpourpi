@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/mgoltzsche/podpourpi/internal/apiserver"
+	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/mgoltzsche/podpourpi/internal/server"
 	"github.com/mgoltzsche/podpourpi/internal/storage"
 	appapi "github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1"
@@ -85,16 +87,30 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 
 	app := &appapi.App{}
 	appStore := apiserver.NewInMemoryStore(&appapi.AppList{}, appapi.EachApp)
-	appKey := "/restprefix"
+	appKey := appapi.GroupVersion.WithResource("apps").GroupResource().String()
 	err := appStore.Create(ctx, appKey, sampleApp, &appapi.App{}, 0)
 	if err != nil {
 		panic(err)
 	}
+
+	dockerClient, err := client.NewClientWithOpts(
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+		client.WithHost(opts.DockerHost),
+	)
+	if err != nil {
+		return err
+	}
+	_, err = runner.NewDockerComposeRunner(ctx, opts.ComposeAppRoot, dockerClient, appStore)
+	if err != nil {
+		return err
+	}
+
 	server, err := apiserver.New().
 		/*WithResource(app, inmemory.NewInMemoryStorageProvider(app, sampleApp)).*/
 		WithResource(app, storage.NewRESTStorageProvider(appKey, app, appStore)).
 		// TODO: when enabling this, make sure all paths are mapped within the extension-apiserver since base apiserver openapi schemes are not included within the /openapi/v2 endpoint
-		//WithExtensionsAPI().
+		WithExtensionsAPI().
 		WithWebUI(opts.UIDir).
 		GenerateKubeconfig("kubeconfig.yaml").
 		Build()

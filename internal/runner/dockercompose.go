@@ -13,8 +13,11 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/mgoltzsche/podpourpi/internal/store"
+	appapi "github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/storage"
 )
 
 const (
@@ -28,18 +31,23 @@ type DockerComposeRunner struct {
 	apps store.Store
 }
 
-func NewDockerComposeRunner(ctx context.Context, dir string, dockerClient *client.Client, apps store.Store) (*DockerComposeRunner, error) {
+func NewDockerComposeRunner(ctx context.Context, dir string, dockerClient *client.Client, apps storage.Interface) (*DockerComposeRunner, error) {
 	composeApps, err := composeAppsFromDirectories(dir)
 	if err != nil {
 		return nil, err
 	}
 	for _, a := range composeApps {
 		app := a
-		apps.Set(a.Name, &app)
+		err = apps.Create(ctx, "/myprefix", &app, &appapi.App{}, 0)
+		if err != nil {
+			return nil, err
+		}
 	}
 	containers := watchDockerContainers(ctx, dockerClient)
 	aggregateAppsFromComposeContainers(containers, apps)
-	return &DockerComposeRunner{dir: dir, apps: apps}, nil
+	// TODO: adjust
+	//return &DockerComposeRunner{dir: dir, apps: apps}, nil
+	return nil, nil
 }
 
 func (r *DockerComposeRunner) Start(a *App, profile string) error {
@@ -166,12 +174,12 @@ func activeProfileLinkPath(dir string) string {
 	return filepath.Join(dir, "env.active")
 }
 
-func composeAppsFromDirectories(dir string) ([]App, error) {
+func composeAppsFromDirectories(dir string) ([]appapi.App, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read compose app root dir: %w", err)
 	}
-	apps := make([]App, 0, len(files))
+	apps := make([]appapi.App, 0, len(files))
 	for _, file := range files {
 		if file.IsDir() {
 			composeDir := filepath.Join(dir, file.Name())
@@ -182,14 +190,12 @@ func composeAppsFromDirectories(dir string) ([]App, error) {
 				if err != nil && !os.IsNotExist(err) {
 					return nil, errors.Wrapf(err, "detect active profile of app %s", file.Name())
 				}
-				apps = append(apps, App{
-					Name: file.Name(),
-					Type: AppTypeDockerCompose,
-					Status: AppStatus{
-						ActiveProfile: activeProfile,
-						State:         AppStateDisabled,
-					},
-				})
+				var a appapi.App
+				a.Name = file.Name()
+				//a.Type = AppTypeDockerCompose
+				a.Status.ActiveProfile = activeProfile
+				a.Status.State = appapi.AppStateUnknown
+				apps = append(apps, a)
 			}
 		}
 	}
@@ -210,36 +216,39 @@ func deriveActiveProfileName(profileDir string) (string, error) {
 	return path[:len(path)-len(envFileSuffix)], nil
 }
 
-func aggregateAppsFromComposeContainers(ch <-chan ContainerEvent, store store.Store) {
+func aggregateAppsFromComposeContainers(ch <-chan ContainerEvent, store storage.Interface) {
 	go func() {
 		for evt := range ch {
 			appName, composeSvc := appNameFromContainer(evt.Container)
 			if appName == "" {
 				continue
 			}
-			var app App
-			err := store.Modify(appName, &app, func() (bool, error) {
-				app.Type = AppTypeDockerCompose
+			var a appapi.App
+			a.Name = appName
+			// TODO: align key
+			err := store.GuaranteedUpdate(context.Background(), "/myprefix", &a, true, nil, func(input runtime.Object, res storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
+				//a.Type = AppTypeDockerCompose
+				a := input.(*appapi.App)
+				output = a
 				switch evt.Type {
 				case EventTypeContainerAdd:
-					app.Name = appName
-					upsertContainer(&app.Status.Containers, evt.Container, composeSvc)
-					app.Status.State = appStateFromContainers(app.Status.Containers)
-					return true, nil
+					upsertContainer(&a.Status.Containers, evt.Container, composeSvc)
+					a.Status.State = appStateFromContainers(a.Status.Containers)
+					return
 				case EventTypeContainerDel:
-					containers := make([]AppContainer, 0, len(app.Status.Containers))
-					for _, c := range app.Status.Containers {
+					containers := make([]appapi.Container, 0, len(a.Status.Containers))
+					for _, c := range a.Status.Containers {
 						if c.ID != evt.Container.ID {
 							containers = append(containers, c)
 						}
 					}
-					app.Status.Containers = containers
-					return true, nil
+					a.Status.Containers = containers
+					return
 				case EventTypeError:
-					return false, fmt.Errorf("received docker error event: %w", evt.Error)
+					return nil, ttl, fmt.Errorf("received docker error event: %w", evt.Error)
 				}
-				return false, fmt.Errorf("received unexpected event type %q", evt.Type)
-			})
+				return nil, ttl, fmt.Errorf("received unexpected event type %q", evt.Type)
+			}, nil)
 			if err != nil {
 				logrus.WithError(err).Error("failed to stream container into app status")
 			}
@@ -259,21 +268,24 @@ func appNameFromContainer(c *Container) (composeProject string, composeService s
 	return
 }
 
-func appStateFromContainers(containers []AppContainer) AppState {
-	currState := AppStateUnknown
+func appStateFromContainers(containers []appapi.Container) appapi.AppState {
+	currState := appapi.AppStateUnknown
 	for _, c := range containers {
-		if c.State > currState {
-			currState = c.State
+		// TODO: fix state resolution
+		if c.Status.State > currState {
+			currState = c.Status.State
 		}
 	}
 	return currState
 }
 
-func upsertContainer(containers *[]AppContainer, add *Container, composeSvc string) {
-	newContainer := AppContainer{
-		ID:    add.ID,
-		Name:  composeSvc,
-		State: toAppState(add.Status),
+func upsertContainer(containers *[]appapi.Container, add *Container, composeSvc string) {
+	newContainer := appapi.Container{
+		ID:   add.ID,
+		Name: composeSvc,
+		Status: appapi.ContainerStatus{
+			State: toAppState(add.Status),
+		},
 	}
 	for i, c := range *containers {
 		if c.ID == add.ID {
@@ -284,20 +296,20 @@ func upsertContainer(containers *[]AppContainer, add *Container, composeSvc stri
 	*containers = append(*containers, newContainer)
 }
 
-func toAppState(containerStatus string) AppState {
+func toAppState(containerStatus string) appapi.AppState {
 	switch containerStatus {
 	case "exited":
-		return AppStateExited
+		return appapi.AppStateExited
 	case "created":
-		return AppStateStarting
+		return appapi.AppStateStarting
 		//case "stop":
 		//		return AppStateStopping
 	case "restarting":
-		return AppStateError
+		return appapi.AppStateError
 	case "running":
-		return AppStateReady
+		return appapi.AppStateRunning
 	default:
 		logrus.Warnf("Unexpected container status %q", containerStatus)
-		return AppStateUnknown
+		return appapi.AppStateUnknown
 	}
 }
