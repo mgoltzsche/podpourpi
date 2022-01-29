@@ -9,6 +9,7 @@ import (
 	"github.com/mgoltzsche/podpourpi/internal/apiserver"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/mgoltzsche/podpourpi/internal/server"
+
 	"github.com/mgoltzsche/podpourpi/internal/storage"
 	appapi "github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -86,7 +87,7 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 	}
 
 	app := &appapi.App{}
-	appStore := apiserver.NewInMemoryStore(&appapi.AppList{}, appapi.EachApp)
+	appStore := apiserver.NewInMemoryStore(apiserver.ObjectKeyFromGroupAndName)
 	appKey := appapi.GroupVersion.WithResource("apps").GroupResource().String()
 	err := appStore.Create(ctx, appKey, sampleApp, &appapi.App{}, 0)
 	if err != nil {
@@ -111,6 +112,7 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 		WithResource(app, storage.NewRESTStorageProvider(appKey, app, appStore)).
 		// TODO: when enabling this, make sure all paths are mapped within the extension-apiserver since base apiserver openapi schemes are not included within the /openapi/v2 endpoint
 		WithExtensionsAPI().
+		WithCoreAPI().
 		WithWebUI(opts.UIDir).
 		GenerateKubeconfig("kubeconfig.yaml").
 		Build()

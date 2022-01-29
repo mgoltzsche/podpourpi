@@ -4,16 +4,56 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mgoltzsche/podpourpi/internal/storage"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic"
 	registryrest "k8s.io/apiserver/pkg/registry/rest"
+	genericapiserver "k8s.io/apiserver/pkg/server"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource/resourcerest"
 	//"sigs.k8s.io/apiserver-runtime/pkg/builder/rest"
 )
+
+func (b *Builder) WithCoreAPI() *Builder {
+	obj := &corev1.ConfigMap{}
+	list := &corev1.ConfigMapList{}
+	gv := corev1.SchemeGroupVersion
+	gr := gv.WithResource("configmaps")
+	svcResource := NewResource(obj, &obj.ObjectMeta, list, true, gr)
+	//b.scheme.AddKnownTypes(corev1.SchemeGroupVersion, obj, list)
+	//b.scheme.SetVersionPriority(corev1.SchemeGroupVersion)
+	storeGetter := storage.NewRESTStorageProvider(gr.Resource, svcResource, NewInMemoryStore(ObjectKeyFromGroupAndName))
+	b.serverConfigs = append(b.serverConfigs, func(srv *genericapiserver.GenericAPIServer) error {
+		// See https://github.com/kubernetes-sigs/apiserver-runtime/blob/v1.0.2/pkg/builder/resource/register.go#L20
+		b.scheme.AddKnownTypes(gv, obj, list)
+		b.scheme.AddKnownTypes(schema.GroupVersion{
+			Group:   gv.Group,
+			Version: runtime.APIVersionInternal,
+		}, obj, list)
+		metav1.AddToGroupVersion(b.scheme, gv)
+		store, err := storeGetter(b.scheme, nil)
+		if err != nil {
+			return err
+		}
+		// apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(group, b.scheme, b.parameterCodec, codecs)
+		apiGroupInfo := genericapiserver.APIGroupInfo{
+			PrioritizedVersions:          b.scheme.PrioritizedVersionsForGroup(""),
+			VersionedResourcesStorageMap: map[string]map[string]registryrest.Storage{},
+			Scheme:                       b.scheme,
+			ParameterCodec:               b.parameterCodec,
+			NegotiatedSerializer:         srv.Serializer,
+		}
+		apiGroupInfo.VersionedResourcesStorageMap["v1"] = map[string]registryrest.Storage{
+			gr.Resource: store,
+		}
+		return srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, &apiGroupInfo)
+	})
+	return b
+}
 
 func (b *Builder) WithResource(obj resource.Object, storageProvider StorageProvider) *Builder {
 	gvr := obj.GetGroupVersionResource()

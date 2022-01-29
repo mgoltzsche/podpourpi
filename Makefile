@@ -59,7 +59,7 @@ generate-openapi: generate build
 	@echo Load OpenAPI spec from freshly built server binary
 	@{ \
 	set -eu; \
-	$(BIN_DIR)/podpourpi serve & \
+	$(BIN_DIR)/podpourpi serve --compose-apps /tmp & \
 	PID=$$!; \
 	sleep 1; \
 	printf '# This file is generated using `make generate-openapi`.\n# DO NOT EDIT MANUALLY!\n\n' > openapi.yaml; \

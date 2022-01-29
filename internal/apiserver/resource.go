@@ -7,15 +7,16 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 )
 
-func NewResource(obj runtime.Object, meta *metav1.ObjectMeta, list runtime.Object, gv schema.GroupVersionResource) resource.Object {
-	return &apiServerObject{Object: obj, objectMeta: meta, listObject: list, gv: gv}
+func NewResource(obj runtime.Object, meta *metav1.ObjectMeta, list runtime.Object, namespaceScoped bool, gv schema.GroupVersionResource) resource.Object {
+	return &apiServerObject{Object: obj, objectMeta: meta, listObject: list, gv: gv, namespaceScoped: namespaceScoped}
 }
 
 type apiServerObject struct {
 	runtime.Object
-	listObject runtime.Object
-	objectMeta *metav1.ObjectMeta
-	gv         schema.GroupVersionResource
+	listObject      runtime.Object
+	objectMeta      *metav1.ObjectMeta
+	gv              schema.GroupVersionResource
+	namespaceScoped bool
 }
 
 func (o *apiServerObject) GetObjectMeta() *metav1.ObjectMeta {
@@ -31,7 +32,7 @@ func (o *apiServerObject) IsStorageVersion() bool {
 }
 
 func (o *apiServerObject) NamespaceScoped() bool {
-	return true
+	return o.namespaceScoped
 }
 
 func (o *apiServerObject) New() runtime.Object {

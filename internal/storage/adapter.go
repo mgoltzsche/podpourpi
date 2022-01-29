@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/generic"
@@ -155,8 +157,18 @@ func (f *storageAdapterREST) Create(
 	}
 
 	out := f.newFunc()
-	f.store.Create(ctx, f.key, obj, out, 0)
-
+	m, err := meta.Accessor(obj)
+	if err != nil {
+		return nil, err
+	}
+	if len(m.GetUID()) != 0 {
+		return nil, fmt.Errorf("cannot create object %s %s because metadata.uid is already set", f.key, m.GetName())
+	}
+	m.SetUID(types.UID(uuid.New().String()))
+	err = f.store.Create(ctx, f.key, obj, out, 0)
+	if err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -170,7 +182,7 @@ func (f *storageAdapterREST) Update(
 	options *metav1.UpdateOptions,
 ) (runtime.Object, bool, error) {
 	isCreate := false
-	oldObj, err := f.Get(ctx, name, nil)
+	oldObj, err := f.Get(ctx, name, &metav1.GetOptions{})
 	if err != nil {
 		if !forceAllowCreate {
 			return nil, false, err
@@ -186,13 +198,14 @@ func (f *storageAdapterREST) Update(
 		}
 	}
 
+	fmt.Printf("## restadapter.Update(): %#v\n", oldObj)
+
 	updatedObj, err := objInfo.UpdatedObject(ctx, oldObj)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("rest storage adapter: get updated object: %w", err)
 	}
 
 	if isCreate {
-		out := f.newFunc()
 		out, err := f.Create(ctx, updatedObj, createValidation, &metav1.CreateOptions{})
 		if err != nil {
 			return nil, false, err
@@ -212,6 +225,12 @@ func (f *storageAdapterREST) Update(
 	}
 
 	obj := f.newFunc()
+	// TODO: remove this once the key is completely built here using the object name.
+	mo, err := meta.Accessor(obj)
+	if err != nil {
+		return nil, false, err
+	}
+	mo.SetName(name)
 	f.store.GuaranteedUpdate(ctx, f.key, obj, false, storage.NewUIDPreconditions(string(m.GetUID())), func(input runtime.Object, res storage.ResponseMeta) (out runtime.Object, ttl *uint64, err error) {
 		// TODO: polish update, set resourceVersion
 		out = updatedObj
@@ -225,7 +244,7 @@ func (f *storageAdapterREST) Delete(
 	name string,
 	deleteValidation rest.ValidateObjectFunc,
 	options *metav1.DeleteOptions) (runtime.Object, bool, error) {
-	oldObj, err := f.Get(ctx, name, nil)
+	oldObj, err := f.Get(ctx, name, &metav1.GetOptions{})
 	if err != nil {
 		return nil, false, err
 	}
@@ -249,7 +268,7 @@ func (f *storageAdapterREST) DeleteCollection(
 	options *metav1.DeleteOptions,
 	listOptions *metainternalversion.ListOptions,
 ) (runtime.Object, error) {
-	panic("TODO: implement DeleteCollection")
+	return nil, fmt.Errorf("TODO: implement storageAdapterREST.DeleteCollection()")
 }
 
 func (f *storageAdapterREST) Watch(ctx context.Context, options *metainternalversion.ListOptions) (watch.Interface, error) {
@@ -257,4 +276,16 @@ func (f *storageAdapterREST) Watch(ctx context.Context, options *metainternalver
 		ResourceVersion: options.ResourceVersion,
 		// TODO: set predicate
 	})
+}
+
+// TODO: use or remove this. If using this all object keys have to be generated this way and passed down to the actual storage
+func (f *storageAdapterREST) objectKey(ctx context.Context, name string) (string, error) {
+	if f.isNamespaced {
+		ns, ok := genericapirequest.NamespaceFrom(ctx)
+		if !ok {
+			return "", ErrNamespaceNotExists
+		}
+		return fmt.Sprintf("/%s.%s/%s/%s", f.groupResource.Resource, f.groupResource.Group, ns, name), nil
+	}
+	return fmt.Sprintf("/%s.%s/%s", f.groupResource.Resource, f.groupResource.Group, name), nil
 }

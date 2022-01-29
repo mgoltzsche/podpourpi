@@ -23,10 +23,8 @@ import (
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/util/feature"
 
-	//corev1 "k8s.io/api/core/v1"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsapiserver "k8s.io/apiextensions-apiserver/pkg/apiserver"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -86,6 +84,7 @@ type Builder struct {
 	groupVersions        map[schema.GroupVersion]bool
 	orderedGroupVersions []schema.GroupVersion
 	extensionAPIEnabled  bool
+	serverConfigs        []func(*genericapiserver.GenericAPIServer) error
 	kubeconfigDestFile   string
 	webDir               string
 }
@@ -135,19 +134,10 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 	// For reference also see https://github.com/kubernetes/kubernetes/blob/v1.23.1/cmd/kube-apiserver/app/server.go#L202
 
 	if b.extensionAPIEnabled {
-		crd := &extensionsv1.CustomResourceDefinition{}
-		crdGroupResource := extensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions")
-		crdRes := NewResource(crd, &crd.ObjectMeta, &extensionsv1.CustomResourceDefinitionList{}, crdGroupResource)
-		crdStore := NewInMemoryStore(&extensionsv1.CustomResourceDefinitionList{}, func(o runtime.Object, fn func(runtime.Object) error) error {
-			for _, item := range o.(*extensionsv1.CustomResourceDefinitionList).Items {
-				o := item
-				err := fn(&o)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		crd := &apiextensionsv1.CustomResourceDefinition{}
+		crdGroupResource := apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions")
+		crdRes := NewResource(crd, &crd.ObjectMeta, &apiextensionsv1.CustomResourceDefinitionList{}, false, crdGroupResource)
+		crdStore := NewInMemoryStore(ObjectKeyFromGroupAndName)
 		key := fmt.Sprintf("%s.%s", crdGroupResource.Resource, crdGroupResource.Group)
 		b.WithResource(crdRes, storageadapter.NewRESTStorageProvider(key, crdRes, crdStore))
 
@@ -192,9 +182,29 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 		return nil, err
 	}
 
-	// Create generic server (
+	// TODO: Make generic server fallback to extensions server - not the other way around.
+	// (However reordering make the extension server controller not receive changes - informer overwritten or sth else missing in the server Config when it is provided to the extension server before the generic server was started?)
+
 	notFoundHandler := notfoundhandler.New(serverConfig.Config.Serializer, genericapifilters.NoMuxAndDiscoveryIncompleteKey)
 	delegate := genericapiserver.NewEmptyDelegateWithCustomHandler(notFoundHandler)
+
+	// Create API extensions server
+	proxyTransport := createProxyTransport()
+	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
+	if err != nil {
+		return nil, fmt.Errorf("build service resolver: %w", err)
+	}
+	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
+	if b.extensionAPIEnabled {
+		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, delegate)
+		if err != nil {
+			return nil, fmt.Errorf("build api extensions server: %w", err)
+		}
+		//genericServer = apiExtensionsServer.GenericAPIServer
+		delegate = apiExtensionsServer.GenericAPIServer
+	}
+
+	// Create generic server (
 	genericServer, err := serverConfig.Complete().New("podpourpi-apiserver", delegate)
 	if err != nil {
 		return nil, err
@@ -212,25 +222,16 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 		}
 		//}
 	}
+	for _, fn := range b.serverConfigs {
+		err := fn(genericServer)
+		if err != nil {
+			return nil, err
+		}
+	}
 	genericServer.AddPostStartHookOrDie("start-apiserver-informers", func(hookCtx genericapiserver.PostStartHookContext) error {
 		serverConfig.SharedInformerFactory.Start(hookCtx.StopCh)
 		return nil
 	})
-
-	// Create API extensions server
-	proxyTransport := createProxyTransport()
-	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
-	if err != nil {
-		return nil, fmt.Errorf("build service resolver: %w", err)
-	}
-	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
-	if b.extensionAPIEnabled {
-		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, genericServer)
-		if err != nil {
-			return nil, fmt.Errorf("build api extensions server: %w", err)
-		}
-	}
-	genericServer = apiExtensionsServer.GenericAPIServer
 
 	// TODO: enable to get crds registered - requires corev1
 	/*if b.extensionAPIEnabled {
@@ -286,24 +287,16 @@ func buildExtensionAPIServer(kubeAPIServerConfig genericapiserver.Config,
 		},
 		ExtraConfig: apiextensionsapiserver.ExtraConfig{
 			CRDRESTOptionsGetter: &restOptionsGetter{
-				Config:     storagebackend.NewDefaultConfig("/customprefix", unstructured.UnstructuredJSONScheme),
-				ListObject: &unstructured.UnstructuredList{},
-				ItemsIterator: func(l runtime.Object, fn func(runtime.Object) error) error {
-					return l.(*unstructured.UnstructuredList).EachListItem(fn)
-				},
+				Config: storagebackend.NewDefaultConfig("/customprefix", unstructured.UnstructuredJSONScheme),
 			},
 			MasterCount:         1,
 			AuthResolverWrapper: authResolverWrapper,
 			ServiceResolver:     serviceResolver,
 		},
 	}
-	crdResource := extensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions").String()
+	crdResource := apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions").String()
 	apiextensionsConfig.GenericConfig.RESTOptionsGetter = &restOptionsGetter{
-		Config:     storagebackend.NewDefaultConfig(crdResource, unstructured.UnstructuredJSONScheme),
-		ListObject: &unstructured.UnstructuredList{},
-		ItemsIterator: func(l runtime.Object, fn func(runtime.Object) error) error {
-			return l.(*unstructured.UnstructuredList).EachListItem(fn)
-		},
+		Config: storagebackend.NewDefaultConfig(crdResource, unstructured.UnstructuredJSONScheme),
 	}
 	apiextensionsConfig.GenericConfig.MergedResourceConfig = extensionAPIResourceConfigSource()
 	//notFoundHandler := notfoundhandler.New(kubeAPIServerConfig.Serializer, genericapifilters.NoMuxAndDiscoveryIncompleteKey)
@@ -334,17 +327,7 @@ func buildAggregatorServer(
 	genericConfig.PostStartHooks = map[string]genericapiserver.PostStartHookConfigEntry{}
 	apiregistrationResource := apiregistrationv1.SchemeGroupVersion.WithResource("apiservices").String()
 	genericConfig.RESTOptionsGetter = &restOptionsGetter{
-		Config:     storagebackend.NewDefaultConfig(apiregistrationResource, unstructured.UnstructuredJSONScheme),
-		ListObject: &apiregistrationv1.APIServiceList{},
-		ItemsIterator: func(l runtime.Object, fn func(runtime.Object) error) error {
-			for _, item := range l.(*apiregistrationv1.APIServiceList).Items {
-				o := item
-				if err := fn(&o); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
+		Config: storagebackend.NewDefaultConfig(apiregistrationResource, unstructured.UnstructuredJSONScheme),
 	}
 	// prevent generic API server from installing the OpenAPI handler. Aggregator server
 	// has its own customized OpenAPI handler.
@@ -525,9 +508,7 @@ func makeAPIService(gv schema.GroupVersion) *apiregistrationv1.APIService {
 }
 
 type restOptionsGetter struct {
-	Config        *storagebackend.Config
-	ListObject    runtime.Object
-	ItemsIterator ItemsIterator
+	Config *storagebackend.Config
 }
 
 func (g *restOptionsGetter) GetRESTOptions(resource schema.GroupResource) (genericregistry.RESTOptions, error) {
@@ -552,15 +533,15 @@ func (g *restOptionsGetter) newInMemoryStore(
 	getAttrsFunc storage.AttrFunc,
 	trigger storage.IndexerFuncs,
 	indexers *cache.Indexers) (storage.Interface, factory.DestroyFunc, error) {
-	return NewInMemoryStore(g.ListObject, g.ItemsIterator), func() {}, nil
+	return NewInMemoryStore(ObjectKeyFromGroupAndName), func() {}, nil
 }
 
 func extensionAPIResourceConfigSource() *serverstorage.ResourceConfig {
 	ret := serverstorage.NewResourceConfig()
 	// NOTE: GroupVersions listed here will be enabled by default. Don't put alpha versions in the list.
 	ret.EnableVersions(
-		v1beta1.SchemeGroupVersion,
-		v1.SchemeGroupVersion,
+		apiextensionsv1beta1.SchemeGroupVersion,
+		apiextensionsv1.SchemeGroupVersion,
 	)
 	return ret
 }

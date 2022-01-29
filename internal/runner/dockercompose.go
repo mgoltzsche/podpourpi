@@ -38,7 +38,9 @@ func NewDockerComposeRunner(ctx context.Context, dir string, dockerClient *clien
 	}
 	for _, a := range composeApps {
 		app := a
-		err = apps.Create(ctx, "/myprefix", &app, &appapi.App{}, 0)
+		// TODO: unify this (avoid having to specify the key here)
+		appKey := fmt.Sprintf("apps.%s", appapi.GroupVersion.Group)
+		err = apps.Create(ctx, appKey, &app, &appapi.App{}, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -224,9 +226,10 @@ func aggregateAppsFromComposeContainers(ch <-chan ContainerEvent, store storage.
 				continue
 			}
 			var a appapi.App
+			key := fmt.Sprintf("apps.%s", appapi.GroupVersion.Group)
 			a.Name = appName
 			// TODO: align key
-			err := store.GuaranteedUpdate(context.Background(), "/myprefix", &a, true, nil, func(input runtime.Object, res storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
+			err := store.GuaranteedUpdate(context.Background(), key, &a, true, nil, func(input runtime.Object, res storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
 				//a.Type = AppTypeDockerCompose
 				a := input.(*appapi.App)
 				output = a

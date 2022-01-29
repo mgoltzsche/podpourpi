@@ -15,28 +15,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	//extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/etcd3"
 )
 
-type ItemsIterator func(l runtime.Object, each func(runtime.Object) error) error
+type ObjectKeyFunc func(key string, o runtime.Object) (k, name string, err error)
 
 type inMemoryStore struct {
 	objects         map[string]runtime.Object
-	listObject      runtime.Object
-	itemsIterator   ItemsIterator
 	lock            sync.RWMutex
 	watcherMutex    sync.RWMutex
 	watchers        map[int]*watcher
 	versioner       etcd3.APIObjectVersioner
+	keyFn           ObjectKeyFunc
 	resourceVersion uint64
 }
 
-func NewInMemoryStore(listObject runtime.Object, itemsFn ItemsIterator) storage.Interface {
-	return &inMemoryStore{objects: map[string]runtime.Object{}, listObject: listObject, itemsIterator: itemsFn, watchers: map[int]*watcher{}}
+func NewInMemoryStore(keyFn ObjectKeyFunc) storage.Interface {
+	return &inMemoryStore{objects: map[string]runtime.Object{}, watchers: map[int]*watcher{}, keyFn: keyFn}
 }
 
 func (s *inMemoryStore) Count(key string) (int64, error) {
@@ -48,7 +49,7 @@ func (s *inMemoryStore) Count(key string) (int64, error) {
 func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime.Object, ttl uint64) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := objectKey(key, obj)
+	k, name, err := s.keyFn(key, obj)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", k, err)
 	}
@@ -61,6 +62,12 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 	m, err := meta.Accessor(obj)
 	if err != nil {
 		return err
+	}
+	if len(m.GetUID()) == 0 {
+		// TODO: clean this up: While apiextensions (crd) rest impl caller generates uid upfront, the docker .
+		// This workaround can be removed when the initial dummy data import gets removed.
+		//return fmt.Errorf("object %s does not specify metadata.uid", key)
+		m.SetUID(types.UID(uuid.New().String()))
 	}
 	m.SetCreationTimestamp(metav1.Now())
 	m.SetResourceVersion("1") // Setting this to a value >0 fixed the not found error
@@ -81,19 +88,20 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 	return nil
 }
 
-func objectKey(key string, o runtime.Object) (k, name string, err error) {
-	meta, err := meta.Accessor(o)
+func ObjectKeyFromGroupAndName(key string, o runtime.Object) (k, name string, err error) {
+	m, err := meta.Accessor(o)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("object key: %w", err)
 	}
-	gr := groupResource(o)
-	// TODO: derive the object key properly
-	if gr.Resource == "customresourcedefinitions" {
-		return strings.TrimLeft(key, "/"), gr.Group, nil
-	}
-	name = meta.GetName()
-	return fmt.Sprintf("%s/%s", key, name), name, nil
+	ns := m.GetNamespace()
+	name = m.GetName()
+	return fmt.Sprintf("%s/%s/%s", key, ns, name), name, nil
 }
+
+/*func ObjectKeyFromKey(key string, o runtime.Object) (k, name string, err error) {
+	gr := groupResource(o)
+	return strings.TrimLeft(key, "/"), gr.Group, nil
+}*/
 
 func groupResource(obj runtime.Object) schema.GroupResource {
 	resource := fmt.Sprintf("%Ts", obj)
@@ -105,7 +113,7 @@ func groupResource(obj runtime.Object) schema.GroupResource {
 func (s *inMemoryStore) Delete(ctx context.Context, key string, obj runtime.Object, preconditions *storage.Preconditions, valid storage.ValidateObjectFunc, cachedExistingObj runtime.Object) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := objectKey(key, obj)
+	k, name, err := s.keyFn(key, obj)
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", k, err)
 	}
@@ -121,7 +129,7 @@ func (s *inMemoryStore) Delete(ctx context.Context, key string, obj runtime.Obje
 func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOptions, obj runtime.Object) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	k, name, err := objectKey(key, obj)
+	k, name, err := s.keyFn(key, obj)
 	if err != nil {
 		return fmt.Errorf("get %s: %w", k, err)
 	}
@@ -142,7 +150,7 @@ func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOpt
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("##   -> %+v\n", obj)
+	//fmt.Printf("##   -> %#v\n", obj)
 	return nil
 }
 
@@ -163,7 +171,7 @@ func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj ru
 	//panic("### " + key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := objectKey(key, obj)
+	k, name, err := s.keyFn(key, obj)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", k, err)
 	}
@@ -217,7 +225,9 @@ func (s *inMemoryStore) List(ctx context.Context, key string, opts storage.ListO
 	fmt.Println("## list", key)
 	keys := make([]string, 0, len(s.objects))
 	for k := range s.objects {
-		keys = append(keys, k)
+		if strings.HasPrefix(k, fmt.Sprintf("%s/", key)) {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
@@ -226,41 +236,39 @@ func (s *inMemoryStore) List(ctx context.Context, key string, opts storage.ListO
 	return nil
 }
 
-func (s *inMemoryStore) Watch(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
-	//return s.WatchList(ctx, key, opts)
-	fmt.Printf("## watch %s\n", key)
-	w := &watcher{
-		id:    len(s.watchers),
-		store: s,
-		ch:    make(chan watch.Event, 10),
-	}
-	s.watcherMutex.Lock()
-	s.watchers[w.id] = w
-	s.watcherMutex.Unlock()
-	return w, nil
+func (s *inMemoryStore) WatchList(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
+	fmt.Printf("## watchlist %s %s\n", key, opts.ResourceVersion)
+	return s.watch(ctx, key, opts), nil
 }
 
-func (s *inMemoryStore) WatchList(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
-	fmt.Println("## watchlist")
-	// TODO: verify difference between Watch() and WatchList() and/or unify both impls
+func (s *inMemoryStore) watch(ctx context.Context, key string, opts storage.ListOptions) *watcher {
 	w := &watcher{
 		id:    len(s.watchers),
 		store: s,
 		ch:    make(chan watch.Event, 10),
 	}
-
 	s.watcherMutex.Lock()
+	defer s.watcherMutex.Unlock()
 	s.watchers[w.id] = w
-	s.watcherMutex.Unlock()
+	return w
+}
+
+func (s *inMemoryStore) Watch(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
+	fmt.Printf("## watch %s %s\n", key, opts.ResourceVersion)
+	// TODO: verify difference between Watch() and WatchList() and/or unify both impls
+	w := s.watch(ctx, key, opts)
+	return w, nil
 
 	// On initial watch, send all the existing objects
-	l := s.listObject.DeepCopyObject()
+	/*l := s.listObject.DeepCopyObject()
+	//l := &metav1.List{}
 	err := s.List(ctx, key, opts, l)
 	if err != nil {
 		return nil, err
 	}
 	ch := make(chan watch.Event)
 	go func() {
+		//for _, o := range l.Items {
 		_ = s.itemsIterator(l, func(o runtime.Object) error {
 			ch <- watch.Event{
 				Type:   watch.Added,
@@ -268,12 +276,13 @@ func (s *inMemoryStore) WatchList(ctx context.Context, key string, opts storage.
 			}
 			return nil
 		})
+		//}
 		for evt := range w.ch {
 			ch <- evt
 		}
 		close(ch)
 	}()
-	return &watcherWrapper{watcher: w, ch: ch}, nil
+	return &watcherWrapper{watcher: w, ch: ch}, nil*/
 }
 
 func (s *inMemoryStore) Versioner() storage.Versioner {

@@ -22,6 +22,7 @@ const (
 // +k8s:openapi-gen=true
 // AppSpec defines the desired state of Cache
 type AppSpec struct {
+	Enabled bool `json:"enabled"`
 }
 
 // +k8s:openapi-gen=true
