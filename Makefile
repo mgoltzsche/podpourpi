@@ -13,7 +13,9 @@ PRISM_MOCK_SERVER_NPM = $(TOOLS_DIR)/prism-cli-$(PRISM_MOCK_SERVER_VERSION)
 PRISM_MOCK_SERVER = $(PRISM_MOCK_SERVER_NPM)/node_modules/@stoplight/prism-cli/dist/index.js
 KUBE_OPENAPI_GEN = $(TOOLS_DIR)/openapi-gen
 KUBE_OPENAPI_GEN_VERSION = e816edb12b65975944ee23073f35617fd9d49215
-
+BATS_DIR := $(TOOLS_DIR)/bats
+BATS = $(BATS_DIR)/bin/bats
+BATS_VERSION := v1.5.0
 CONTROLLER_GEN = $(TOOLS_DIR)/controller-gen
 CONTROLLER_GEN_VERSION = v0.4.1
 
@@ -53,7 +55,7 @@ generate: $(CONTROLLER_GEN) $(OAPI_CODEGEN) $(DEEPCOPY_GEN) $(KUBE_OPENAPI_GEN)
 	#$(CONTROLLER_GEN) crd paths=./pkg/apis/... output:dir=./crd
 	$(CONTROLLER_GEN) object paths=./pkg/apis/...
 	$(KUBE_OPENAPI_GEN) --output-base=./pkg/generated --output-package=openapi -O zz_generated.openapi -h ./boilerplate/boilerplate.go.txt \
-		--input-dirs=github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1,k8s.io/api/core/v1,k8s.io/kube-aggregator/pkg/apis/apiregistration/v1,k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1,k8s.io/apimachinery/pkg/apis/meta/v1,k8s.io/apimachinery/pkg/runtime,k8s.io/apimachinery/pkg/version,k8s.io/apimachinery/pkg/util/intstr
+		--input-dirs=github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1,k8s.io/api/core/v1,k8s.io/kube-aggregator/pkg/apis/apiregistration/v1,k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1,k8s.io/apimachinery/pkg/apis/meta/v1,k8s.io/apimachinery/pkg/runtime,k8s.io/apimachinery/pkg/version,k8s.io/apimachinery/pkg/util/intstr,k8s.io/apimachinery/pkg/api/resource
 
 generate-openapi: generate build
 	@echo Load OpenAPI spec from freshly built server binary
@@ -70,6 +72,21 @@ generate-openapi: generate build
 validate-openapi: ui/node_modules
 	@echo Validating the OpenAPI spec at $(OPENAPI_FILE)
 	cd ui && npm run openapi:validate
+
+test-e2e: $(BATS)
+	#./build/bin/podpourpi serve --ui=./ui/dist --compose-apps /home/max/development/embedded/
+	$(BATS) -T ./e2e
+
+$(BATS):
+	@echo Downloading bats
+	@{ \
+	set -e ;\
+	mkdir -p $(TOOLS_DIR) ;\
+	TMP_DIR=$$(mktemp -d) ;\
+	cd $$TMP_DIR ;\
+	git clone -c 'advice.detachedHead=false' --branch=$(BATS_VERSION) --depth=1 https://github.com/bats-core/bats-core.git . >/dev/null;\
+	./install.sh '$(BATS_DIR)'; \
+	}
 
 $(OAPI_CODEGEN): ## Installs oapi-codegen
 	$(call go-get-tool,$(OAPI_CODEGEN),github.com/deepmap/oapi-codegen/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION))

@@ -47,7 +47,7 @@ export class ApiClient<T extends Resource> {
     })
   }
   public watch(handler: (evt:WatchEvent<T>)=>void): void {
-    watch(`${this.resourceUrl}?watch=1&allowWatchBookmarks=1`, handler)
+    watch(`${this.resourceUrl}?watch=1&allowWatchBookmarks=1&resourceVersion=0`, handler)
   }
   public update(obj: T): CancelablePromise<T> {
     return request({

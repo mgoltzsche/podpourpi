@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mgoltzsche/podpourpi/internal/storage"
+	storageadapter "github.com/mgoltzsche/podpourpi/internal/storage"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -12,33 +12,31 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic"
 	registryrest "k8s.io/apiserver/pkg/registry/rest"
+
 	genericapiserver "k8s.io/apiserver/pkg/server"
+	"k8s.io/apiserver/pkg/storage"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource/resourcerest"
 	//"sigs.k8s.io/apiserver-runtime/pkg/builder/rest"
 )
 
 func (b *Builder) WithCoreAPI() *Builder {
-	obj := &corev1.ConfigMap{}
+	/*obj := &corev1.ConfigMap{}
 	list := &corev1.ConfigMapList{}
-	gv := corev1.SchemeGroupVersion
-	gr := gv.WithResource("configmaps")
-	svcResource := NewResource(obj, &obj.ObjectMeta, list, true, gr)
-	//b.scheme.AddKnownTypes(corev1.SchemeGroupVersion, obj, list)
+	resource := NewResource(obj, list, true, corev1.SchemeGroupVersion.WithResource("configmaps"))
 	//b.scheme.SetVersionPriority(corev1.SchemeGroupVersion)
-	storeGetter := storage.NewRESTStorageProvider(gr.Resource, svcResource, NewInMemoryStore(ObjectKeyFromGroupAndName))
+	// See https://github.com/kubernetes-sigs/apiserver-runtime/blob/v1.0.2/pkg/builder/resource/register.go#L20
+	b.scheme.AddKnownTypes(resource.GetGroupVersionResource().GroupVersion(), obj, list)
+	b.scheme.AddKnownTypes(schema.GroupVersion{
+		Group:   resource.GetGroupVersionResource().Group,
+		Version: runtime.APIVersionInternal,
+	}, obj, list)
+	metav1.AddToGroupVersion(b.scheme, resource.GetGroupVersionResource().GroupVersion())
+	store, err := storageadapter.NewRESTStorageAdapter(resource, NewInMemoryStore(ObjectKeyFromGroupAndName), b.scheme)
+	if err != nil {
+		panic(err)
+	}
 	b.serverConfigs = append(b.serverConfigs, func(srv *genericapiserver.GenericAPIServer) error {
-		// See https://github.com/kubernetes-sigs/apiserver-runtime/blob/v1.0.2/pkg/builder/resource/register.go#L20
-		b.scheme.AddKnownTypes(gv, obj, list)
-		b.scheme.AddKnownTypes(schema.GroupVersion{
-			Group:   gv.Group,
-			Version: runtime.APIVersionInternal,
-		}, obj, list)
-		metav1.AddToGroupVersion(b.scheme, gv)
-		store, err := storeGetter(b.scheme, nil)
-		if err != nil {
-			return err
-		}
 		// apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(group, b.scheme, b.parameterCodec, codecs)
 		apiGroupInfo := genericapiserver.APIGroupInfo{
 			PrioritizedVersions:          b.scheme.PrioritizedVersionsForGroup(""),
@@ -48,10 +46,29 @@ func (b *Builder) WithCoreAPI() *Builder {
 			NegotiatedSerializer:         srv.Serializer,
 		}
 		apiGroupInfo.VersionedResourcesStorageMap["v1"] = map[string]registryrest.Storage{
-			gr.Resource: store,
+			resource.GetGroupVersionResource().Resource: store,
 		}
 		return srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, &apiGroupInfo)
+	})*/
+	store := NewInMemoryStore()
+	apiGroupBuilder := NewAPIGroupBuilder().
+		WithVersion(NewAPIGroupVersion(corev1.SchemeGroupVersion).
+			WithResourceStorage("configmaps", &corev1.ConfigMap{}, &corev1.ConfigMapList{}, true, store).
+			WithResourceStorage("secrets", &corev1.Secret{}, &corev1.SecretList{}, true, store).
+			WithResourceStorage("pods", &corev1.Pod{}, &corev1.PodList{}, true, store),
+		)
+	b.serverConfigs = append(b.serverConfigs, func(srv *genericapiserver.GenericAPIServer) error {
+		apiGroup, err := apiGroupBuilder.Build(b.scheme, srv.Serializer, b.parameterCodec)
+		if err != nil {
+			return err
+		}
+		return srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, apiGroup)
 	})
+	return b
+}
+
+func (b *Builder) WithResourceStorage(obj resource.Object, store storage.Interface) *Builder {
+	b.WithResource(obj, storageadapter.NewRESTStorageProvider(obj, store))
 	return b
 }
 

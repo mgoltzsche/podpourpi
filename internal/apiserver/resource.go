@@ -7,11 +7,11 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 )
 
-func NewResource(obj runtime.Object, meta *metav1.ObjectMeta, list runtime.Object, namespaceScoped bool, gv schema.GroupVersionResource) resource.Object {
-	return &apiServerObject{Object: obj, objectMeta: meta, listObject: list, gv: gv, namespaceScoped: namespaceScoped}
+func NewResource(obj runtime.Object, list runtime.Object, namespaceScoped bool, gv schema.GroupVersionResource) resource.Object {
+	return &Resource{Object: obj, objectMeta: &metav1.ObjectMeta{}, listObject: list, gv: gv, namespaceScoped: namespaceScoped}
 }
 
-type apiServerObject struct {
+type Resource struct {
 	runtime.Object
 	listObject      runtime.Object
 	objectMeta      *metav1.ObjectMeta
@@ -19,26 +19,26 @@ type apiServerObject struct {
 	namespaceScoped bool
 }
 
-func (o *apiServerObject) GetObjectMeta() *metav1.ObjectMeta {
+func (o *Resource) GetObjectMeta() *metav1.ObjectMeta {
 	return o.objectMeta
 }
 
-func (o *apiServerObject) GetGroupVersionResource() schema.GroupVersionResource {
+func (o *Resource) GetGroupVersionResource() schema.GroupVersionResource {
 	return o.gv
 }
 
-func (o *apiServerObject) IsStorageVersion() bool {
+func (o *Resource) IsStorageVersion() bool {
 	return true
 }
 
-func (o *apiServerObject) NamespaceScoped() bool {
+func (o *Resource) NamespaceScoped() bool {
 	return o.namespaceScoped
 }
 
-func (o *apiServerObject) New() runtime.Object {
+func (o *Resource) New() runtime.Object {
 	return o.Object.DeepCopyObject()
 }
 
-func (o *apiServerObject) NewList() runtime.Object {
+func (o *Resource) NewList() runtime.Object {
 	return o.listObject.DeepCopyObject()
 }

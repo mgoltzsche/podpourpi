@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	storageadapter "github.com/mgoltzsche/podpourpi/internal/storage"
+
 	"github.com/docker/docker/client"
 	"github.com/mgoltzsche/podpourpi/internal/store"
 	appapi "github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1"
@@ -38,8 +40,7 @@ func NewDockerComposeRunner(ctx context.Context, dir string, dockerClient *clien
 	}
 	for _, a := range composeApps {
 		app := a
-		// TODO: unify this (avoid having to specify the key here)
-		appKey := fmt.Sprintf("apps.%s", appapi.GroupVersion.Group)
+		appKey := storageadapter.ObjectKey(appapi.GroupVersion.WithResource("apps").GroupResource(), a.Namespace, a.Name)
 		err = apps.Create(ctx, appKey, &app, &appapi.App{}, 0)
 		if err != nil {
 			return nil, err

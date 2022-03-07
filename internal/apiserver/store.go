@@ -32,12 +32,11 @@ type inMemoryStore struct {
 	watcherMutex    sync.RWMutex
 	watchers        map[int]*watcher
 	versioner       etcd3.APIObjectVersioner
-	keyFn           ObjectKeyFunc
 	resourceVersion uint64
 }
 
-func NewInMemoryStore(keyFn ObjectKeyFunc) storage.Interface {
-	return &inMemoryStore{objects: map[string]runtime.Object{}, watchers: map[int]*watcher{}, keyFn: keyFn}
+func NewInMemoryStore() storage.Interface {
+	return &inMemoryStore{objects: map[string]runtime.Object{}, watchers: map[int]*watcher{}}
 }
 
 func (s *inMemoryStore) Count(key string) (int64, error) {
@@ -49,12 +48,8 @@ func (s *inMemoryStore) Count(key string) (int64, error) {
 func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime.Object, ttl uint64) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := s.keyFn(key, obj)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", k, err)
-	}
-	if existing := s.objects[k]; existing != nil {
-		return errors.NewAlreadyExists(groupResource(obj), name)
+	if existing := s.objects[key]; existing != nil {
+		return errors.NewAlreadyExists(groupResource(obj), key) // TODO: provide name instead of key
 	}
 	if ttl > 0 {
 		return fmt.Errorf("ttl > 0 is not supported, provided ttl: %d", ttl)
@@ -71,7 +66,7 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 	}
 	m.SetCreationTimestamp(metav1.Now())
 	m.SetResourceVersion("1") // Setting this to a value >0 fixed the not found error
-	fmt.Printf("## add %s\n", k)
+	fmt.Printf("## add %s\n", key)
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
 		return fmt.Errorf("create %T: tounstructured: %w", obj, err)
@@ -80,28 +75,13 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 	if err != nil {
 		return fmt.Errorf("create %T: fromunstructured: %w", obj, err)
 	}
-	s.objects[k] = obj.DeepCopyObject()
+	s.objects[key] = obj.DeepCopyObject()
 	s.notifyWatchers(watch.Event{
 		Type:   watch.Added,
 		Object: out,
 	})
 	return nil
 }
-
-func ObjectKeyFromGroupAndName(key string, o runtime.Object) (k, name string, err error) {
-	m, err := meta.Accessor(o)
-	if err != nil {
-		return "", "", fmt.Errorf("object key: %w", err)
-	}
-	ns := m.GetNamespace()
-	name = m.GetName()
-	return fmt.Sprintf("%s/%s/%s", key, ns, name), name, nil
-}
-
-/*func ObjectKeyFromKey(key string, o runtime.Object) (k, name string, err error) {
-	gr := groupResource(o)
-	return strings.TrimLeft(key, "/"), gr.Group, nil
-}*/
 
 func groupResource(obj runtime.Object) schema.GroupResource {
 	resource := fmt.Sprintf("%Ts", obj)
@@ -113,34 +93,27 @@ func groupResource(obj runtime.Object) schema.GroupResource {
 func (s *inMemoryStore) Delete(ctx context.Context, key string, obj runtime.Object, preconditions *storage.Preconditions, valid storage.ValidateObjectFunc, cachedExistingObj runtime.Object) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := s.keyFn(key, obj)
-	if err != nil {
-		return fmt.Errorf("delete %s: %w", k, err)
-	}
+	fmt.Printf("## delete %s\n", key)
 	// TODO: run preconditions and validators
-	found := s.objects[k]
+	found := s.objects[key]
 	if found == nil {
-		return errors.NewNotFound(groupResource(obj), name)
+		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
 	}
-	delete(s.objects, k)
+	delete(s.objects, key)
 	return nil
 }
 
 func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOptions, obj runtime.Object) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	k, name, err := s.keyFn(key, obj)
-	if err != nil {
-		return fmt.Errorf("get %s: %w", k, err)
-	}
-	fmt.Printf("## get %s\n", k)
-	found := s.objects[k]
+	fmt.Printf("## get %s\n", key)
+	found := s.objects[key]
 	if found == nil {
 		fmt.Printf("##   -> not found\n")
 		if opts.IgnoreNotFound {
 			return nil
 		}
-		return errors.NewNotFound(groupResource(obj), name)
+		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
 	}
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(found)
 	if err != nil {
@@ -171,18 +144,14 @@ func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj ru
 	//panic("### " + key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	k, name, err := s.keyFn(key, obj)
-	if err != nil {
-		return fmt.Errorf("update %s: %w", k, err)
-	}
-	fmt.Printf("## mod %s\n", k)
-	found := s.objects[k]
+	fmt.Printf("## mod %s\n", key)
+	found := s.objects[key]
 	if found == nil {
 		fmt.Printf("##   -> not found (ignore: %v)\n", ignoreNotFound)
 		if ignoreNotFound {
 			return nil
 		}
-		return errors.NewNotFound(groupResource(obj), name)
+		return errors.NewNotFound(groupResource(obj), key)
 	}
 	found = found.DeepCopyObject()
 	resVer, err := s.versioner.ObjectResourceVersion(found)
@@ -207,7 +176,7 @@ func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj ru
 		return fmt.Errorf("update %T: tounstructured: %w", out, err)
 	}
 	runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj)
-	s.objects[k] = out.DeepCopyObject()
+	s.objects[key] = out.DeepCopyObject()
 	s.notifyWatchers(watch.Event{
 		Type:   watch.Added,
 		Object: out,

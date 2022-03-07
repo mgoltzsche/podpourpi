@@ -9,13 +9,11 @@ import (
 	"github.com/mgoltzsche/podpourpi/internal/apiserver"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/mgoltzsche/podpourpi/internal/server"
-
 	"github.com/mgoltzsche/podpourpi/internal/storage"
+
 	appapi "github.com/mgoltzsche/podpourpi/pkg/apis/app/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-
-	//corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	//"sigs.k8s.io/apiserver-runtime/pkg/builder"
 	//"github.com/mgoltzsche/podpourpi/internal/storage/inmemory"
@@ -80,19 +78,20 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 	WithLocalDebugExtension().
 	Execute()*/
 
+	app := &appapi.App{}
+	appStore := apiserver.NewInMemoryStore()
 	sampleApp := &appapi.App{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "some-app",
 		},
 	}
-
-	app := &appapi.App{}
-	appStore := apiserver.NewInMemoryStore(apiserver.ObjectKeyFromGroupAndName)
-	appKey := appapi.GroupVersion.WithResource("apps").GroupResource().String()
+	appKey := storage.ObjectKey(app.GetGroupVersionResource().GroupResource(), sampleApp.GetNamespace(), sampleApp.GetName())
 	err := appStore.Create(ctx, appKey, sampleApp, &appapi.App{}, 0)
 	if err != nil {
 		panic(err)
 	}
+
+	//configMap := apiserver.NewResource(&corev1.ConfigMap{}, &corev1.ConfigMapList{}, true, corev1.SchemeGroupVersion.WithResource("configmaps"))
 
 	dockerClient, err := client.NewClientWithOpts(
 		client.FromEnv,
@@ -109,7 +108,8 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 
 	server, err := apiserver.New().
 		/*WithResource(app, inmemory.NewInMemoryStorageProvider(app, sampleApp)).*/
-		WithResource(app, storage.NewRESTStorageProvider(appKey, app, appStore)).
+		WithResourceStorage(app, appStore).
+		//WithResourceStorage(configMap, apiserver.NewInMemoryStore()).
 		// TODO: when enabling this, make sure all paths are mapped within the extension-apiserver since base apiserver openapi schemes are not included within the /openapi/v2 endpoint
 		WithExtensionsAPI().
 		WithCoreAPI().

@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	genericapiserver "k8s.io/apiserver/pkg/server"
 )
 
 const envVarPrefix = "PODPOURPI_"
@@ -22,7 +23,7 @@ func Execute(logger *logrus.Entry) error {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	ctx := newContext()
+	ctx := genericapiserver.SetupSignalContext()
 	rootCmd.SetFlagErrorFunc(handleFlagError)
 	rootCmd.AddCommand(newServeCommand(ctx, logger))
 	supportedEnvVars := map[string]struct{}{}

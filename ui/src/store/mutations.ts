@@ -28,7 +28,9 @@ function applyChange<T extends Resource>(typeName: string, items: Array<T>, evtT
   }
   console.log('mutate:', evtType, typeName, o)
   switch(evtType) {
-    case EventType.ADDED, EventType.MODIFIED, EventType.BOOKMARK:
+	case EventType.BOOKMARK: // TODO: handle bookmark event properly: take into account that it doesn't contain any data but the resourceVersion
+    case EventType.MODIFIED:
+    case EventType.ADDED:
       items = items.filter(a => a.metadata.name != o.metadata.name)
       items.push(o)
       break

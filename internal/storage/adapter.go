@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -25,30 +27,33 @@ import (
 )
 
 // NewRESTStorageProvider use ephemeral in-memory storage.
-func NewRESTStorageProvider(key string, obj resource.Object, target storage.Interface) StorageProvider {
-	return func(scheme *runtime.Scheme, getter generic.RESTOptionsGetter) (rest.Storage, error) {
-		gr := obj.GetGroupVersionResource().GroupResource()
-		codec, _, err := storagecodec.NewStorageCodec(storagecodec.StorageCodecConfig{
-			StorageMediaType:  runtime.ContentTypeJSON,
-			StorageSerializer: serializer.NewCodecFactory(scheme),
-			StorageVersion:    scheme.PrioritizedVersionsForGroup(obj.GetGroupVersionResource().Group)[0],
-			MemoryVersion:     scheme.PrioritizedVersionsForGroup(obj.GetGroupVersionResource().Group)[0],
-			Config:            storagebackend.Config{}, // useless fields..
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		return NewStorageAdapterREST(
-			gr,
-			codec,
-			obj.NamespaceScoped(),
-			key,
-			obj.New,
-			obj.NewList,
-			target,
-		), nil
+func NewRESTStorageProvider(obj resource.Object, target storage.Interface) StorageProvider {
+	return func(scheme *runtime.Scheme, _ generic.RESTOptionsGetter) (rest.Storage, error) {
+		return NewRESTStorageAdapter(obj, target, scheme)
 	}
+}
+
+func NewRESTStorageAdapter(obj resource.Object, target storage.Interface, scheme *runtime.Scheme) (rest.Storage, error) {
+	gr := obj.GetGroupVersionResource().GroupResource()
+	codec, _, err := storagecodec.NewStorageCodec(storagecodec.StorageCodecConfig{
+		StorageMediaType:  runtime.ContentTypeJSON,
+		StorageSerializer: serializer.NewCodecFactory(scheme),
+		StorageVersion:    scheme.PrioritizedVersionsForGroup(obj.GetGroupVersionResource().Group)[0],
+		MemoryVersion:     scheme.PrioritizedVersionsForGroup(obj.GetGroupVersionResource().Group)[0],
+		Config:            storagebackend.Config{}, // useless fields..
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return NewStorageAdapterREST(
+		gr,
+		codec,
+		obj.NamespaceScoped(),
+		obj.New,
+		obj.NewList,
+		target,
+	), nil
 }
 
 var _ rest.StandardStorage = &storageAdapterREST{}
@@ -63,7 +68,6 @@ func NewStorageAdapterREST(
 	groupResource schema.GroupResource,
 	codec runtime.Codec,
 	isNamespaced bool,
-	key string,
 	newFunc func() runtime.Object,
 	newListFunc func() runtime.Object,
 	store storage.Interface,
@@ -73,7 +77,7 @@ func NewStorageAdapterREST(
 		groupResource:  groupResource,
 		codec:          codec,
 		isNamespaced:   isNamespaced,
-		key:            key,
+		key:            fmt.Sprintf("/%s.%s", groupResource.Resource, groupResource.Group),
 		newFunc:        newFunc,
 		newListFunc:    newListFunc,
 		store:          store,
@@ -120,7 +124,11 @@ func (f *storageAdapterREST) Get(
 		// TODO: set ignoreNotFound?!
 		ResourceVersion: options.ResourceVersion,
 	}
-	err = f.store.Get(ctx, f.key, opts, obj)
+	key, err := f.objectKey(ctx, m.GetName())
+	if err != nil {
+		return nil, err
+	}
+	err = f.store.Get(ctx, key, opts, obj)
 	return obj, err
 }
 
@@ -161,11 +169,15 @@ func (f *storageAdapterREST) Create(
 	if err != nil {
 		return nil, err
 	}
+	key, err := f.objectKey(ctx, m.GetName())
+	if err != nil {
+		return nil, err
+	}
 	if len(m.GetUID()) != 0 {
-		return nil, fmt.Errorf("cannot create object %s %s because metadata.uid is already set", f.key, m.GetName())
+		return nil, fmt.Errorf("cannot create object %s because metadata.uid is already set", key)
 	}
 	m.SetUID(types.UID(uuid.New().String()))
-	err = f.store.Create(ctx, f.key, obj, out, 0)
+	err = f.store.Create(ctx, key, obj, out, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -223,15 +235,17 @@ func (f *storageAdapterREST) Update(
 	if err != nil {
 		return nil, false, err
 	}
-
 	obj := f.newFunc()
-	// TODO: remove this once the key is completely built here using the object name.
 	mo, err := meta.Accessor(obj)
 	if err != nil {
 		return nil, false, err
 	}
+	key, err := f.objectKey(ctx, name)
+	if err != nil {
+		return nil, false, err
+	}
 	mo.SetName(name)
-	f.store.GuaranteedUpdate(ctx, f.key, obj, false, storage.NewUIDPreconditions(string(m.GetUID())), func(input runtime.Object, res storage.ResponseMeta) (out runtime.Object, ttl *uint64, err error) {
+	f.store.GuaranteedUpdate(ctx, key, obj, false, storage.NewUIDPreconditions(string(m.GetUID())), func(input runtime.Object, res storage.ResponseMeta) (out runtime.Object, ttl *uint64, err error) {
 		// TODO: polish update, set resourceVersion
 		out = updatedObj
 		return
@@ -255,7 +269,11 @@ func (f *storageAdapterREST) Delete(
 		}
 	}
 
-	err = f.store.Delete(ctx, f.key, oldObj, nil, nil, oldObj)
+	key, err := f.objectKey(ctx, name)
+	if err != nil {
+		return nil, false, err
+	}
+	err = f.store.Delete(ctx, key, oldObj, nil, nil, oldObj)
 	if err != nil {
 		return nil, false, err
 	}
@@ -271,21 +289,88 @@ func (f *storageAdapterREST) DeleteCollection(
 	return nil, fmt.Errorf("TODO: implement storageAdapterREST.DeleteCollection()")
 }
 
-func (f *storageAdapterREST) Watch(ctx context.Context, options *metainternalversion.ListOptions) (watch.Interface, error) {
-	return f.store.Watch(ctx, f.key, storage.ListOptions{
+func (f *storageAdapterREST) Watch(ctx context.Context, options *metainternalversion.ListOptions) (w watch.Interface, err error) {
+	w, err = f.store.Watch(ctx, f.key, storage.ListOptions{
 		ResourceVersion: options.ResourceVersion,
 		// TODO: set predicate
 	})
+	if err != nil {
+		return w, err
+	}
+	defer func() {
+		if err != nil {
+			w.Stop()
+		}
+	}()
+	// TODO: support deletion event replay when opts.ResourceVersion is set
+	if options.ResourceVersion != "" {
+		list, err := f.List(ctx, options)
+		if err != nil {
+			return w, err
+		}
+		l, err := getListPrt(list)
+		if err != nil {
+			return w, err
+		}
+		ch := make(chan watch.Event)
+		go func() {
+			for i := 0; i < l.Len(); i++ {
+				ch <- watch.Event{
+					Type:   watch.Added,
+					Object: l.Index(i).Addr().Interface().(runtime.Object),
+				}
+			}
+			for evt := range w.ResultChan() {
+				ch <- evt
+			}
+		}()
+		return &watcherWrapper{Interface: w, ch: ch}, nil
+	}
+	return w, nil
 }
 
-// TODO: use or remove this. If using this all object keys have to be generated this way and passed down to the actual storage
+func getListPrt(listObj runtime.Object) (reflect.Value, error) {
+	listPtr, err := meta.GetItemsPtr(listObj)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	v, err := conversion.EnforcePtr(listPtr)
+	if err != nil || v.Kind() != reflect.Slice {
+		return reflect.Value{}, fmt.Errorf("need ptr to slice: %v", err)
+	}
+	return v, nil
+}
+
+type watcherWrapper struct {
+	watch.Interface
+	ch chan watch.Event
+}
+
+func (w *watcherWrapper) ResultChan() <-chan watch.Event {
+	return w.ch
+}
+
 func (f *storageAdapterREST) objectKey(ctx context.Context, name string) (string, error) {
 	if f.isNamespaced {
 		ns, ok := genericapirequest.NamespaceFrom(ctx)
 		if !ok {
 			return "", ErrNamespaceNotExists
 		}
-		return fmt.Sprintf("/%s.%s/%s/%s", f.groupResource.Resource, f.groupResource.Group, ns, name), nil
+		return objectKey(f.key, ns, name), nil
 	}
-	return fmt.Sprintf("/%s.%s/%s", f.groupResource.Resource, f.groupResource.Group, name), nil
+	return objectKey(f.key, "_", name), nil
+}
+
+func objectKey(prefix, namespace, name string) string {
+	if namespace == "" {
+		namespace = "_"
+	}
+	return fmt.Sprintf("%s/%s/%s", prefix, namespace, name)
+}
+
+func ObjectKey(gr schema.GroupResource, namespace, name string) string {
+	if gr.Group == "" {
+		return objectKey(gr.Resource, namespace, name)
+	}
+	return objectKey(fmt.Sprintf("/%s.%s", gr.Resource, gr.Group), namespace, name)
 }

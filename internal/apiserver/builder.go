@@ -48,7 +48,6 @@ import (
 
 	"k8s.io/kube-aggregator/pkg/controllers/autoregister"
 	//apiextensionsoptions "k8s.io/apiextensions-apiserver/pkg/cmd/server/options"
-	storageadapter "github.com/mgoltzsche/podpourpi/internal/storage"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	genericapifilters "k8s.io/apiserver/pkg/endpoints/filters"
 	serverstorage "k8s.io/apiserver/pkg/server/storage"
@@ -136,10 +135,9 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 	if b.extensionAPIEnabled {
 		crd := &apiextensionsv1.CustomResourceDefinition{}
 		crdGroupResource := apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions")
-		crdRes := NewResource(crd, &crd.ObjectMeta, &apiextensionsv1.CustomResourceDefinitionList{}, false, crdGroupResource)
-		crdStore := NewInMemoryStore(ObjectKeyFromGroupAndName)
-		key := fmt.Sprintf("%s.%s", crdGroupResource.Resource, crdGroupResource.Group)
-		b.WithResource(crdRes, storageadapter.NewRESTStorageProvider(key, crdRes, crdStore))
+		crdRes := NewResource(crd, &apiextensionsv1.CustomResourceDefinitionList{}, false, crdGroupResource)
+		crdStore := NewInMemoryStore()
+		b.WithResource(crdRes, storageprovider.NewRESTStorageProvider(crdRes, crdStore))
 
 		// TODO: support corev1 apigroup
 		/*svc := &corev1.Service{}
@@ -187,23 +185,6 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 
 	notFoundHandler := notfoundhandler.New(serverConfig.Config.Serializer, genericapifilters.NoMuxAndDiscoveryIncompleteKey)
 	delegate := genericapiserver.NewEmptyDelegateWithCustomHandler(notFoundHandler)
-
-	// Create API extensions server
-	proxyTransport := createProxyTransport()
-	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
-	if err != nil {
-		return nil, fmt.Errorf("build service resolver: %w", err)
-	}
-	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
-	if b.extensionAPIEnabled {
-		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, delegate)
-		if err != nil {
-			return nil, fmt.Errorf("build api extensions server: %w", err)
-		}
-		//genericServer = apiExtensionsServer.GenericAPIServer
-		delegate = apiExtensionsServer.GenericAPIServer
-	}
-
 	// Create generic server (
 	genericServer, err := serverConfig.Complete().New("podpourpi-apiserver", delegate)
 	if err != nil {
@@ -211,7 +192,8 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 	}
 	// Install API groups
 	for _, apiGroup := range apiGroups {
-		/*if apiGroup.Scheme.IsGroupRegistered("") {
+		/*if apiGroup.OptionsExternalVersion.Group == "" {
+			//if apiGroup.Scheme.IsGroupRegistered("") {
 			// Handle e.g. corev1
 			if err := genericServer.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, apiGroup); err != nil {
 				return nil, fmt.Errorf("install legacy apigroup: %w", err)
@@ -232,6 +214,26 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 		serverConfig.SharedInformerFactory.Start(hookCtx.StopCh)
 		return nil
 	})
+
+	// Create API extensions server
+	proxyTransport := createProxyTransport()
+	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
+	if err != nil {
+		return nil, fmt.Errorf("build service resolver: %w", err)
+	}
+	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
+	if b.extensionAPIEnabled {
+		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, genericServer)
+		if err != nil {
+			return nil, fmt.Errorf("build api extensions server: %w", err)
+		}
+		/*apiExtensionsServer.GenericAPIServer.AddPostStartHookOrDie("start-extensionsapiserver-informers", func(hookCtx genericapiserver.PostStartHookContext) error {
+			apiExtensionsServer.Informers.Start(hookCtx.StopCh)
+			return nil
+		})*/
+		genericServer = apiExtensionsServer.GenericAPIServer
+		//delegate = apiExtensionsServer.GenericAPIServer
+	}
 
 	// TODO: enable to get crds registered - requires corev1
 	/*if b.extensionAPIEnabled {
@@ -533,7 +535,7 @@ func (g *restOptionsGetter) newInMemoryStore(
 	getAttrsFunc storage.AttrFunc,
 	trigger storage.IndexerFuncs,
 	indexers *cache.Indexers) (storage.Interface, factory.DestroyFunc, error) {
-	return NewInMemoryStore(ObjectKeyFromGroupAndName), func() {}, nil
+	return NewInMemoryStore(), func() {}, nil
 }
 
 func extensionAPIResourceConfigSource() *serverstorage.ResourceConfig {
