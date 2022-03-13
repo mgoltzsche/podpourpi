@@ -94,12 +94,24 @@ func (s *inMemoryStore) Delete(ctx context.Context, key string, obj runtime.Obje
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	fmt.Printf("## delete %s\n", key)
-	// TODO: run preconditions and validators
+	err := valid(ctx, obj)
+	if err != nil {
+		return err
+	}
 	found := s.objects[key]
 	if found == nil {
 		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
 	}
+	found = found.DeepCopyObject()
+	err = preconditions.Check(key, found)
+	if err != nil {
+		return err
+	}
 	delete(s.objects, key)
+	s.notifyWatchers(watch.Event{
+		Type:   watch.Deleted,
+		Object: found,
+	})
 	return nil
 }
 
@@ -123,25 +135,29 @@ func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOpt
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("##   -> %#v\n", obj)
 	return nil
 }
 
+// GetToList fetches custom resources and is used to watch a specific resource for which the key is provided.
 func (s *inMemoryStore) GetToList(ctx context.Context, key string, opts storage.ListOptions, obj runtime.Object) error {
-	fmt.Println("## gettolist")
-	return s.List(ctx, key, opts, obj)
+	fmt.Printf("## gettolist %T\n", obj)
+	l, err := getListPrt(obj)
+	if err != nil {
+		return err
+	}
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	fmt.Printf("## get %s\n", key)
+	found := s.objects[key]
+	if found == nil {
+		fmt.Printf("##   -> not found\n")
+		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
+	}
+	appendItem(l, found.DeepCopyObject())
+	return nil
 }
 
 func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj runtime.Object, ignoreNotFound bool, preconditions *storage.Preconditions, modify storage.UpdateFunc, cachedExistingObject runtime.Object) error {
-	// TODO: check caller code to find reason for crd not being found after it was created.
-	// See:
-	//  k8s.io/apiserver/pkg/registry/generic/registry.(*DryRunnableStorage).GuaranteedUpdate(0x8, {0x250cd78, 0xc001574630}, {0xc001a41a40, 0x4}, {0x24ef600, 0xc0009e8580}, 0x0, 0x203000, 0xc0009abef0, ...)
-	//  /home/max/go/pkg/mod/k8s.io/apiserver@v0.23.1/pkg/registry/generic/registry/dryrun.go:101
-	//  k8s.io/apiserver/pkg/registry/generic/registry.(*Store).Update(0xc0000c57c0, {0x250cd78, 0xc001574630}, {0xc00063c03c, 0xc000c95c38}, {0x24f0668, 0xc0003fa870}, 0xc000a08320, 0x22ca928, 0x0, ...)
-	// 	/home/max/go/pkg/mod/k8s.io/apiserver@v0.23.1/pkg/registry/generic/registry/store.go:517 +0x508
-	//  k8s.io/apiextensions-apiserver/pkg/registry/customresourcedefinition.(*StatusREST).Update(0x255f5a8, {0x250cd78, 0xc001574630}, {0xc00063c03c, 0x0}, {0x24f0668, 0xc0003fa870}, 0x0, 0x4, 0x0, ...)
-	//  /home/max/go/pkg/mod/k8s.io/apiextensions-apiserver@v0.23.1/pkg/registry/customresourcedefinition/etcd.go:207
-	//panic("### " + key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	fmt.Printf("## mod %s\n", key)
@@ -158,12 +174,14 @@ func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj ru
 	if err != nil {
 		return err
 	}
-	// TODO: run preconditions and validator
+	err = preconditions.Check(key, found)
+	if err != nil {
+		return err
+	}
 	out, ttl, err := modify(found, storage.ResponseMeta{
 		ResourceVersion: resVer,
 	})
 	if err != nil {
-		fmt.Printf("#########################%T %s\n", err, err) // CRD not found
 		return err
 	}
 	if ttl != nil && *ttl > 0 {

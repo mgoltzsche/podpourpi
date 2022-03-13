@@ -24,7 +24,6 @@ import (
 	"k8s.io/apiserver/pkg/util/feature"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsapiserver "k8s.io/apiextensions-apiserver/pkg/apiserver"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -132,31 +131,6 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 
 	// For reference also see https://github.com/kubernetes/kubernetes/blob/v1.23.1/cmd/kube-apiserver/app/server.go#L202
 
-	if b.extensionAPIEnabled {
-		crd := &apiextensionsv1.CustomResourceDefinition{}
-		crdGroupResource := apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions")
-		crdRes := NewResource(crd, &apiextensionsv1.CustomResourceDefinitionList{}, false, crdGroupResource)
-		crdStore := NewInMemoryStore()
-		b.WithResource(crdRes, storageprovider.NewRESTStorageProvider(crdRes, crdStore))
-
-		// TODO: support corev1 apigroup
-		/*svc := &corev1.Service{}
-		svcGroupResource := corev1.SchemeGroupVersion.WithResource("services")
-		svcRes := NewResource(svc, &svc.ObjectMeta, &corev1.ServiceList{}, svcGroupResource)
-		svcStore := NewInMemoryStore(&corev1.ServiceList{}, func(o runtime.Object, fn func(runtime.Object) error) error {
-			for _, item := range o.(*corev1.ServiceList).Items {
-				o := item
-				err := fn(&o)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		key = fmt.Sprintf("%s.%s", svcGroupResource.Resource, svcGroupResource.Group)
-		b.WithResource(svcRes, storageadapter.NewRESTStorageProvider(key, svcRes, svcStore))*/
-	}
-
 	codecs := serializer.NewCodecFactory(b.scheme)
 	serverConfig := genericapiserver.NewRecommendedConfig(codecs)
 	serverConfig.ExternalAddress = "127.0.0.1:8080"
@@ -174,7 +148,8 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create real external clientset: %w", err)
 	}
-	serverConfig.SharedInformerFactory = clientgoinformers.NewSharedInformerFactory(clientgoExternalClient, 10*time.Minute)
+	versionedInformer := clientgoinformers.NewSharedInformerFactory(clientgoExternalClient, 10*time.Minute)
+	serverConfig.SharedInformerFactory = versionedInformer
 	apiGroups, err := b.buildAPIGroupInfos(serverConfig.RESTOptionsGetter, codecs)
 	if err != nil {
 		return nil, err
@@ -182,10 +157,31 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 
 	// TODO: Make generic server fallback to extensions server - not the other way around.
 	// (However reordering make the extension server controller not receive changes - informer overwritten or sth else missing in the server Config when it is provided to the extension server before the generic server was started?)
+	// => Actually, the crd controller seems not to be triggered since the generic API server also has the CRD resource registered, overlaying the extensions apiserver that is used as fallback.
+	//    Potential FIX: figure out how to include the fallback server's api resources (kubectl api-resources; apiextensions path is listed properly by http://localhost:8080/).
 
 	notFoundHandler := notfoundhandler.New(serverConfig.Config.Serializer, genericapifilters.NoMuxAndDiscoveryIncompleteKey)
 	delegate := genericapiserver.NewEmptyDelegateWithCustomHandler(notFoundHandler)
-	// Create generic server (
+
+	// Create API extensions server
+	// TODO: Make custom resource cleanup controller work.
+	//       Eventually the cleanup is just not triggered since the generation did not change.
+	proxyTransport := createProxyTransport()
+	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
+	if err != nil {
+		return nil, fmt.Errorf("build service resolver: %w", err)
+	}
+	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
+	if b.extensionAPIEnabled {
+		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, delegate)
+		if err != nil {
+			return nil, fmt.Errorf("build api extensions server: %w", err)
+		}
+		//genericServer = apiExtensionsServer.GenericAPIServer
+		delegate = apiExtensionsServer.GenericAPIServer
+	}
+
+	// Create generic server
 	genericServer, err := serverConfig.Complete().New("podpourpi-apiserver", delegate)
 	if err != nil {
 		return nil, err
@@ -211,38 +207,18 @@ func (b *Builder) Build() (*genericapiserver.GenericAPIServer, error) {
 		}
 	}
 	genericServer.AddPostStartHookOrDie("start-apiserver-informers", func(hookCtx genericapiserver.PostStartHookContext) error {
-		serverConfig.SharedInformerFactory.Start(hookCtx.StopCh)
+		versionedInformer.Start(hookCtx.StopCh)
 		return nil
 	})
 
-	// Create API extensions server
-	proxyTransport := createProxyTransport()
-	serviceResolver, err := buildServiceResolver(serverConfig.Config.LoopbackClientConfig.Host, serverConfig.SharedInformerFactory)
-	if err != nil {
-		return nil, fmt.Errorf("build service resolver: %w", err)
-	}
-	var apiExtensionsServer *apiextensionsapiserver.CustomResourceDefinitions
 	if b.extensionAPIEnabled {
-		apiExtensionsServer, err = buildExtensionAPIServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, genericServer)
-		if err != nil {
-			return nil, fmt.Errorf("build api extensions server: %w", err)
-		}
-		/*apiExtensionsServer.GenericAPIServer.AddPostStartHookOrDie("start-extensionsapiserver-informers", func(hookCtx genericapiserver.PostStartHookContext) error {
-			apiExtensionsServer.Informers.Start(hookCtx.StopCh)
-			return nil
-		})*/
-		genericServer = apiExtensionsServer.GenericAPIServer
-		//delegate = apiExtensionsServer.GenericAPIServer
-	}
-
-	// TODO: enable to get crds registered - requires corev1
-	/*if b.extensionAPIEnabled {
+		// Create aggregator server
 		aggregatorServer, err := buildAggregatorServer(serverConfig.Config, serverConfig.SharedInformerFactory, serviceResolver, proxyTransport, genericServer, apiExtensionsServer.Informers)
 		if err != nil {
 			return nil, fmt.Errorf("build api aggregator server: %w", err)
 		}
 		genericServer = aggregatorServer.GenericAPIServer
-	}*/
+	}
 
 	// Generate kubeconfig file
 	if b.kubeconfigDestFile != "" {
@@ -276,6 +252,18 @@ func writeKubeconfigFile(file string, contextName string, config *restclient.Con
 	return nil
 }
 
+/*func enableAPIVersion(server *genericapiserver.GenericAPIServer, gv schema.GroupVersion) {
+	av := metav1.GroupVersionForDiscovery{
+		Version:      gv.Version,
+		GroupVersion: gv.String(),
+	}
+	server.DiscoveryGroupManager.AddGroup(metav1.APIGroup{
+		Name:             apiextensionsv1.SchemeGroupVersion.Group,
+		Versions:         []metav1.GroupVersionForDiscovery{av},
+		PreferredVersion: av,
+	})
+}*/
+
 func buildExtensionAPIServer(kubeAPIServerConfig genericapiserver.Config,
 	externalInformers clientgoinformers.SharedInformerFactory,
 	serviceResolver aggregatorapiserver.ServiceResolver,
@@ -308,11 +296,7 @@ func buildExtensionAPIServer(kubeAPIServerConfig genericapiserver.Config,
 	if err != nil {
 		return nil, fmt.Errorf("new api extensions server: %w", err)
 	}
-	// TODO: remove if the following is not needed
-	apiextensionsConfig.GenericConfig.AddPostStartHookOrDie("start-crd-informers", func(context genericapiserver.PostStartHookContext) error {
-		apiExtensionsServer.Informers.Start(context.StopCh)
-		return nil
-	})
+	apiextensionsConfig.GenericConfig.PostStartHooks = map[string]genericapiserver.PostStartHookConfigEntry{}
 	return apiExtensionsServer, nil
 }
 
@@ -349,7 +333,6 @@ func buildAggregatorServer(
 	aggregatorConfig.GenericConfig.MergedResourceConfig = aggregatorAPIResourceConfigSource()
 
 	// createAggregatorServer
-
 	aggregatorServer, err := aggregatorConfig.Complete().NewWithDelegate(delegateAPIServer)
 	if err != nil {
 		return nil, err
@@ -451,6 +434,9 @@ func apiServicesToRegister(delegateAPIServer genericapiserver.DelegationTarget, 
 	for _, curr := range delegateAPIServer.ListedPaths() {
 		if curr == "/api/v1" {
 			apiService := makeAPIService(schema.GroupVersion{Group: "", Version: "v1"})
+			if apiService == nil {
+				continue
+			}
 			registration.AddAPIServiceToSyncOnStart(apiService)
 			apiServices = append(apiServices, apiService)
 			continue
@@ -476,9 +462,10 @@ func apiServicesToRegister(delegateAPIServer genericapiserver.DelegationTarget, 
 	return apiServices
 }
 
-// See https://github.com/kubernetes/kubernetes/blob/v1.13.0/cmd/kube-apiserver/app/aggregator.go#L236
+// See https://github.com/kubernetes/kubernetes/blob/v1.23.0/cmd/kube-apiserver/app/aggregator.go#L268
 var apiVersionPriorities = map[schema.GroupVersion]priority{
-	{Group: "apiextensions.k8s.io", Version: "v1beta1"}: {group: 16700, version: 9},
+	{Group: "apiextensions.k8s.io", Version: "v1"}: {group: 16700, version: 15},
+	//{Group: "apiextensions.k8s.io", Version: "v1beta1"}: {group: 16700, version: 9},
 }
 
 // priority defines group priority that is used in discovery. This controls
@@ -542,7 +529,6 @@ func extensionAPIResourceConfigSource() *serverstorage.ResourceConfig {
 	ret := serverstorage.NewResourceConfig()
 	// NOTE: GroupVersions listed here will be enabled by default. Don't put alpha versions in the list.
 	ret.EnableVersions(
-		apiextensionsv1beta1.SchemeGroupVersion,
 		apiextensionsv1.SchemeGroupVersion,
 	)
 	return ret

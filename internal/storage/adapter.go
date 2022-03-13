@@ -77,7 +77,7 @@ func NewStorageAdapterREST(
 		groupResource:  groupResource,
 		codec:          codec,
 		isNamespaced:   isNamespaced,
-		key:            fmt.Sprintf("/%s.%s", groupResource.Resource, groupResource.Group),
+		key:            fmt.Sprintf("/%s", groupResource.String()),
 		newFunc:        newFunc,
 		newListFunc:    newListFunc,
 		store:          store,
@@ -119,15 +119,15 @@ func (f *storageAdapterREST) Get(
 	if err != nil {
 		return nil, fmt.Errorf("get: %w", err)
 	}
-	m.SetName(name)
 	opts := storage.GetOptions{
 		// TODO: set ignoreNotFound?!
 		ResourceVersion: options.ResourceVersion,
 	}
-	key, err := f.objectKey(ctx, m.GetName())
+	key, err := f.objectKey(ctx, name)
 	if err != nil {
 		return nil, err
 	}
+	m.SetName(name)
 	err = f.store.Get(ctx, key, opts, obj)
 	return obj, err
 }
@@ -245,11 +245,15 @@ func (f *storageAdapterREST) Update(
 		return nil, false, err
 	}
 	mo.SetName(name)
-	f.store.GuaranteedUpdate(ctx, key, obj, false, storage.NewUIDPreconditions(string(m.GetUID())), func(input runtime.Object, res storage.ResponseMeta) (out runtime.Object, ttl *uint64, err error) {
+	// TODO: delete resource when deletionTimestamp set and finalizers cleared?!
+	err = f.store.GuaranteedUpdate(ctx, key, obj, false, storage.NewUIDPreconditions(string(m.GetUID())), func(input runtime.Object, res storage.ResponseMeta) (out runtime.Object, ttl *uint64, err error) {
 		// TODO: polish update, set resourceVersion
 		out = updatedObj
 		return
 	}, oldObj)
+	if err != nil {
+		return nil, false, err
+	}
 	return obj, false, nil
 }
 
@@ -263,6 +267,16 @@ func (f *storageAdapterREST) Delete(
 		return nil, false, err
 	}
 
+	// TODO: ensure finalizers are respected here:
+	/*if len(m.GetFinalizers()) > 0 {
+		if m.GetDeletionTimestamp() != nil {
+			return old, false, nil
+		}
+		now := metav1.Now()
+		m.SetDeletionTimestamp(&now)
+		m.SetGeneration(m.GetGeneration() + 1)
+		f.store.GuaranteedUpdate(...)
+	}*/
 	if deleteValidation != nil {
 		if err := deleteValidation(ctx, oldObj); err != nil {
 			return nil, false, err
@@ -273,11 +287,15 @@ func (f *storageAdapterREST) Delete(
 	if err != nil {
 		return nil, false, err
 	}
-	err = f.store.Delete(ctx, key, oldObj, nil, nil, oldObj)
+	err = f.store.Delete(ctx, key, oldObj, nil, storage.ValidateObjectFunc(validateDeletion), oldObj)
 	if err != nil {
 		return nil, false, err
 	}
 	return oldObj, true, nil
+}
+
+func validateDeletion(ctx context.Context, obj runtime.Object) error {
+	return nil
 }
 
 func (f *storageAdapterREST) DeleteCollection(
@@ -369,8 +387,5 @@ func objectKey(prefix, namespace, name string) string {
 }
 
 func ObjectKey(gr schema.GroupResource, namespace, name string) string {
-	if gr.Group == "" {
-		return objectKey(gr.Resource, namespace, name)
-	}
-	return objectKey(fmt.Sprintf("/%s.%s", gr.Resource, gr.Group), namespace, name)
+	return objectKey(fmt.Sprintf("/%s", gr.String()), namespace, name)
 }

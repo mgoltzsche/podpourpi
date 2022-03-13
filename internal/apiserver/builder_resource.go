@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -21,48 +22,37 @@ import (
 )
 
 func (b *Builder) WithCoreAPI() *Builder {
-	/*obj := &corev1.ConfigMap{}
-	list := &corev1.ConfigMapList{}
-	resource := NewResource(obj, list, true, corev1.SchemeGroupVersion.WithResource("configmaps"))
-	//b.scheme.SetVersionPriority(corev1.SchemeGroupVersion)
-	// See https://github.com/kubernetes-sigs/apiserver-runtime/blob/v1.0.2/pkg/builder/resource/register.go#L20
-	b.scheme.AddKnownTypes(resource.GetGroupVersionResource().GroupVersion(), obj, list)
-	b.scheme.AddKnownTypes(schema.GroupVersion{
-		Group:   resource.GetGroupVersionResource().Group,
-		Version: runtime.APIVersionInternal,
-	}, obj, list)
-	metav1.AddToGroupVersion(b.scheme, resource.GetGroupVersionResource().GroupVersion())
-	store, err := storageadapter.NewRESTStorageAdapter(resource, NewInMemoryStore(ObjectKeyFromGroupAndName), b.scheme)
-	if err != nil {
-		panic(err)
-	}
-	b.serverConfigs = append(b.serverConfigs, func(srv *genericapiserver.GenericAPIServer) error {
-		// apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(group, b.scheme, b.parameterCodec, codecs)
-		apiGroupInfo := genericapiserver.APIGroupInfo{
-			PrioritizedVersions:          b.scheme.PrioritizedVersionsForGroup(""),
-			VersionedResourcesStorageMap: map[string]map[string]registryrest.Storage{},
-			Scheme:                       b.scheme,
-			ParameterCodec:               b.parameterCodec,
-			NegotiatedSerializer:         srv.Serializer,
-		}
-		apiGroupInfo.VersionedResourcesStorageMap["v1"] = map[string]registryrest.Storage{
-			resource.GetGroupVersionResource().Resource: store,
-		}
-		return srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, &apiGroupInfo)
-	})*/
 	store := NewInMemoryStore()
 	apiGroupBuilder := NewAPIGroupBuilder().
+		// TODO: flatten resource builder so that builder clients can pick resource by resource
 		WithVersion(NewAPIGroupVersion(corev1.SchemeGroupVersion).
+			WithResourceStorage("nodes", &corev1.Node{}, &corev1.NodeList{}, false, store).
+			WithResourceStorage("namespaces", &corev1.Namespace{}, &corev1.NamespaceList{}, false, store).
 			WithResourceStorage("configmaps", &corev1.ConfigMap{}, &corev1.ConfigMapList{}, true, store).
 			WithResourceStorage("secrets", &corev1.Secret{}, &corev1.SecretList{}, true, store).
-			WithResourceStorage("pods", &corev1.Pod{}, &corev1.PodList{}, true, store),
+			WithResourceStorage("pods", &corev1.Pod{}, &corev1.PodList{}, true, store).
+			// kube-aggregator requires Service and Endpoint
+			WithResourceStorage("services", &corev1.Service{}, &corev1.ServiceList{}, true, store).
+			WithResourceStorage("endpoints", &corev1.Endpoints{}, &corev1.EndpointsList{}, true, store),
 		)
 	b.serverConfigs = append(b.serverConfigs, func(srv *genericapiserver.GenericAPIServer) error {
+		ctx := context.Background()
+		defaultNamespace := &corev1.Namespace{}
+		defaultNamespace.Name = "default"
+		err := store.Create(ctx, storageadapter.ObjectKey(corev1.SchemeGroupVersion.WithResource("namespaces").GroupResource(), "", defaultNamespace.Name), defaultNamespace, defaultNamespace, 0)
+		if err != nil {
+			return fmt.Errorf("create default namespace: %w", err)
+		}
 		apiGroup, err := apiGroupBuilder.Build(b.scheme, srv.Serializer, b.parameterCodec)
 		if err != nil {
 			return err
 		}
-		return srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, apiGroup)
+		err = srv.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, apiGroup)
+		if err != nil {
+			return err
+		}
+		// TODO: Add Namespace cleanup controller?! - https://github.com/kubernetes/kubernetes/blob/v1.23.1/pkg/controller/namespace/namespace_controller.go#L66
+		return nil
 	})
 	return b
 }

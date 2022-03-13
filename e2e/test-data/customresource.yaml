@@ -1,0 +1,6 @@
+apiVersion: some.group.example.org/v1
+kind: SampleResource
+metadata:
+  name: some-example
+spec:
+  somekey: some value
