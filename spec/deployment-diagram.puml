@@ -1,0 +1,51 @@
+@startuml
+
+title Deployment and data synchronization
+
+'TODO: Separate app's git ref from params permission-wise in order to prevent an attacker from letting the raspi run an arbitrary container.
+'      Maybe introduce Repository kind to constrain the git repositories that users can use.
+
+actor user
+
+rectangle "root node (Raspberry Pi)" as root {
+  database "App (git ref + params)" as rootApp
+  database ConfigMaps as rootConfig
+  database Secrets as rootSecret
+
+  rootApp --> rootConfig : uses
+  rootApp --> rootSecret : uses
+}
+
+rectangle "agent node A (Raspberry Pi)" as agentA {
+  database "App (git ref + params)" as agentAApp
+  database ConfigMaps as agentAConfig
+  database Secrets as agentASecret
+
+  agentAConfig <-- agentAApp : uses
+  agentASecret <-- agentAApp : uses
+}
+
+rectangle "agent node B (Raspberry Pi)" as agentB {
+  database "App (git ref + params)" as agentBApp
+  database ConfigMaps as agentBConfig
+  database Secrets as agentBSecret
+
+  agentBConfig <-- agentBApp : uses
+  agentBSecret <-- agentBApp : uses
+}
+
+root <-[hidden]- agentA
+agentA <-[hidden]- agentB
+
+user -> rootApp : configure profiles,\nactivate profile,\nturn on/off
+user -> rootSecret : create/modify
+
+rootConfig ..> agentAConfig : sync
+rootSecret ..> agentASecret : sync
+rootApp .. agentAApp : bidirectional sync:\n* spec down\n* status up
+
+agentAConfig ..> agentBConfig : sync
+agentASecret ..> agentBSecret : sync
+agentAApp .. agentBApp
+
+@enduml
