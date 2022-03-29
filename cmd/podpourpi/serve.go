@@ -123,16 +123,43 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 	srv := &http.Server{
 		Addr: opts.Address,
 	}
-	go func() {
-		<-ctx.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := srv.Shutdown(ctx); err != nil {
-			opts.Logger.Println("error: failed to shut down server:", err)
-		}
-		cancel()
-	}()
 	srv.Handler = prepared.Handler
-	// TODO: clean this up
-	go srv.ListenAndServe()
-	return prepared.Run(ctx.Done())
+	return parallelize(ctx,
+		func(ctx context.Context) error {
+			go func() {
+				<-ctx.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := srv.Shutdown(ctx); err != nil {
+					opts.Logger.Println("error: failed to shut down server:", err)
+				}
+				cancel()
+			}()
+			return srv.ListenAndServe()
+		},
+		func(ctx context.Context) error {
+			return prepared.Run(ctx.Done())
+		},
+	)
+}
+
+// parallelize runs the provided methods concurrently and cancels the context when any of them returns.
+func parallelize(ctx context.Context, daemons ...func(context.Context) error) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan error, len(daemons))
+	for _, fn := range daemons {
+		go func(fn func(context.Context) error) {
+			err := fn(ctx)
+			done <- err
+			cancel()
+		}(fn)
+	}
+	for i := 0; i < len(daemons); i++ {
+		e := <-done
+		if err == nil {
+			err = e
+		}
+	}
+	cancel()
+	close(done)
+	return err
 }

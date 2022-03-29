@@ -11,7 +11,9 @@ rectangle "root node (Raspberry Pi)" as root {
   database "App (git ref + params)" as rootApp
   database ConfigMaps as rootConfig
   database Secrets as rootSecret
+  database DockerCompose as rootDc
 
+  rootApp *--> rootDc : creates
   rootApp --> rootConfig : uses
   rootApp --> rootSecret : uses
 }
@@ -20,7 +22,9 @@ rectangle "agent node A (Raspberry Pi)" as agentA {
   database "App (git ref + params)" as agentAApp
   database ConfigMaps as agentAConfig
   database Secrets as agentASecret
+  database DockerCompose as agentADc
 
+  agentADc <--* agentAApp : creates
   agentAConfig <-- agentAApp : uses
   agentASecret <-- agentAApp : uses
 }
@@ -29,7 +33,9 @@ rectangle "agent node B (Raspberry Pi)" as agentB {
   database "App (git ref + params)" as agentBApp
   database ConfigMaps as agentBConfig
   database Secrets as agentBSecret
+  database DockerCompose as agentBDc
 
+  agentBDc <--* agentBApp : creates
   agentBConfig <-- agentBApp : uses
   agentBSecret <-- agentBApp : uses
 }
@@ -39,6 +45,8 @@ agentA <-[hidden]- agentB
 
 user -> rootApp : configure profiles,\nactivate profile,\nturn on/off
 user -> rootSecret : create/modify
+
+agentADc ..> rootDc : sync status up\nthe hierarchy
 
 rootConfig ..> agentAConfig : sync
 rootSecret ..> agentASecret : sync

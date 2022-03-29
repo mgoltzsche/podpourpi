@@ -3,6 +3,7 @@ package apiserver
 import (
 	"context"
 	"fmt"
+	"path"
 	"reflect"
 	"sort"
 	"strings"
@@ -49,7 +50,7 @@ func (s *inMemoryStore) Create(ctx context.Context, key string, obj, out runtime
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if existing := s.objects[key]; existing != nil {
-		return errors.NewAlreadyExists(groupResource(obj), key) // TODO: provide name instead of key
+		return errors.NewAlreadyExists(groupResource(obj), path.Base(key)) // TODO: provide name instead of key
 	}
 	if ttl > 0 {
 		return fmt.Errorf("ttl > 0 is not supported, provided ttl: %d", ttl)
@@ -100,7 +101,7 @@ func (s *inMemoryStore) Delete(ctx context.Context, key string, obj runtime.Obje
 	}
 	found := s.objects[key]
 	if found == nil {
-		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
+		return errors.NewNotFound(groupResource(obj), path.Base(key))
 	}
 	found = found.DeepCopyObject()
 	err = preconditions.Check(key, found)
@@ -125,7 +126,7 @@ func (s *inMemoryStore) Get(ctx context.Context, key string, opts storage.GetOpt
 		if opts.IgnoreNotFound {
 			return nil
 		}
-		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
+		return errors.NewNotFound(groupResource(obj), path.Base(key))
 	}
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(found)
 	if err != nil {
@@ -151,7 +152,7 @@ func (s *inMemoryStore) GetToList(ctx context.Context, key string, opts storage.
 	found := s.objects[key]
 	if found == nil {
 		fmt.Printf("##   -> not found\n")
-		return errors.NewNotFound(groupResource(obj), key) // TODO: provide object name instead of key
+		return errors.NewNotFound(groupResource(obj), path.Base(key))
 	}
 	appendItem(l, found.DeepCopyObject())
 	return nil
@@ -167,7 +168,7 @@ func (s *inMemoryStore) GuaranteedUpdate(ctx context.Context, key string, obj ru
 		if ignoreNotFound {
 			return nil
 		}
-		return errors.NewNotFound(groupResource(obj), key)
+		return errors.NewNotFound(groupResource(obj), path.Base(key))
 	}
 	found = found.DeepCopyObject()
 	resVer, err := s.versioner.ObjectResourceVersion(found)

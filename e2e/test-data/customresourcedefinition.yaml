@@ -47,6 +47,11 @@ spec:
                 somekey:
                   description: Some example spec value
                   type: string
+                  #enum:
+                  #- on
+                  #- off
+                  # TODO: how to declare reference: x-type: otherresource.api.example.org
+                  #example: defaultvalue
             status:
               description: Status of the custom resource.
               type: object
