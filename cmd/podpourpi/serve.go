@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/docker/docker/client"
 	"github.com/mgoltzsche/podpourpi/internal/apiserver"
+	"github.com/mgoltzsche/podpourpi/internal/kubelet"
 	"github.com/mgoltzsche/podpourpi/internal/runner"
 	"github.com/mgoltzsche/podpourpi/internal/server"
 	"github.com/mgoltzsche/podpourpi/internal/storage"
@@ -20,9 +22,11 @@ import (
 )
 
 func newServeCommand(ctx context.Context, logger *logrus.Entry) *cobra.Command {
-	opts := server.Options{
+	kubeletOpts := kubelet.NewOptions()
+	dockerAddress := kubeletOpts.Runtime.DockerEndpoint
+	serverOpts := server.Options{
 		Address:        "127.0.0.1:8080",
-		DockerHost:     "unix:///var/run/docker.sock",
+		DockerHost:     dockerAddress,
 		UIDir:          "./ui",
 		ComposeAppRoot: "/etc/podpourpi/apps",
 		Logger:         logger,
@@ -33,18 +37,24 @@ func newServeCommand(ctx context.Context, logger *logrus.Entry) *cobra.Command {
 		Args:  cobra.ExactArgs(0),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			//return server.RunServer(ctx, opts)
-			return runAPIServer(ctx, opts)
+			serverOpts.DockerHost = dockerAddress
+			kubeletOpts.Runtime.DockerEndpoint = dockerAddress
+			return runAPIServer(ctx, serverOpts, kubeletOpts)
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&opts.Address, "address", opts.Address, "server listen address")
-	f.StringVar(&opts.DockerHost, "docker-address", opts.DockerHost, "docker client address")
-	f.StringVar(&opts.ComposeAppRoot, "compose-apps", opts.ComposeAppRoot, "directory containing the web UI")
-	f.StringVar(&opts.UIDir, "ui", opts.UIDir, "directory containing the web UI")
+	f.StringVar(&serverOpts.Address, "address", serverOpts.Address, "server listen address")
+	f.StringVar(&dockerAddress, "docker-address", dockerAddress, "docker client address")
+	f.StringVar(&serverOpts.ComposeAppRoot, "compose-apps", serverOpts.ComposeAppRoot, "directory containing the web UI")
+	f.StringVar(&serverOpts.UIDir, "ui", serverOpts.UIDir, "directory containing the web UI")
+	f.StringVar(&kubeletOpts.RootDirectory, "kubelet-root-dir", kubeletOpts.RootDirectory, "kubelet root directory")
+	f.StringVar(&kubeletOpts.MountPath, "kubelet-mount-path", kubeletOpts.MountPath, "kubelet mount path")
+	f.StringVar(&kubeletOpts.Node.Name, "node-name", kubeletOpts.Node.Name, "node name")
+	f.StringVar(&kubeletOpts.Node.IP, "node-ip", kubeletOpts.Node.IP, "node IP")
 	return cmd
 }
 
-func runAPIServer(ctx context.Context, opts server.Options) error {
+func runAPIServer(ctx context.Context, opts server.Options, kubeletOpts kubelet.Options) error {
 	/*err := builder.APIServer.
 	WithoutEtcd().
 	DisableAdmissionControllers().
@@ -124,6 +134,10 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 		Addr: opts.Address,
 	}
 	srv.Handler = prepared.Handler
+	/*k, err := kubelet.NewKubelet()
+	if err != nil {
+		return err
+	}*/
 	return parallelize(ctx,
 		func(ctx context.Context) error {
 			go func() {
@@ -134,10 +148,27 @@ func runAPIServer(ctx context.Context, opts server.Options) error {
 				}
 				cancel()
 			}()
-			return srv.ListenAndServe()
+			err := srv.ListenAndServe()
+			if err != nil {
+				return fmt.Errorf("http server: %w", err)
+			}
+			return nil
 		},
 		func(ctx context.Context) error {
-			return prepared.Run(ctx.Done())
+			err := prepared.Run(ctx.Done())
+			if err != nil {
+				return fmt.Errorf("api server: %w", err)
+			}
+			return nil
+		},
+		func(ctx context.Context) error {
+			time.Sleep(3 * time.Second)
+			err := kubelet.RunKubelet(ctx, kubeletOpts)
+			if err != nil {
+				logrus.Error(err)
+				return fmt.Errorf("kubelet: %w", err)
+			}
+			return nil
 		},
 	)
 }
