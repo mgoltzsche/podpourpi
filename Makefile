@@ -28,6 +28,10 @@ build:
 	mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/podpourpi ./cmd/podpourpi
 
+.PHONY: image
+image:
+	docker build -t podpourpi .
+
 .PHONY: ui
 ui: ui-build ui-type-check
 
